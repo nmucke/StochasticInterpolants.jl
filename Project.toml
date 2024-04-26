@@ -1,0 +1,13 @@
+name = "StochasticInterpolants"
+uuid = "637f3dc3-f457-4b64-a9b7-81a6afe6addd"
+authors = ["nmucke"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
