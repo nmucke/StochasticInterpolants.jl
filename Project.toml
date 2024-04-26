@@ -3,6 +3,19 @@ uuid = "637f3dc3-f457-4b64-a9b7-81a6afe6addd"
 authors = ["nmucke"]
 version = "1.0.0-DEV"
 
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+LuxCUDA = "d0bbae9a-e099-4d5b-a835-1c6931763bda"
+MLDatasets = "eb30cadb-4394-5ae3-aed4-317e484a6458"
+MLUtils = "f1d291b0-491e-4a28-83b9-f70985020b54"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
+Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
 [compat]
 julia = "1.10"
 
