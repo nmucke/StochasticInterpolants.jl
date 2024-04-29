@@ -148,8 +148,11 @@ function (db::DownBlock)(
     skips = () # accumulate intermediate outputs
     for i in 1:length(db.residual_blocks)
         layer_name = Symbol(:layer_, i)
-        x, new_st = db.residual_blocks[i](x, ps.residual_blocks[layer_name],
-                                          st.residual_blocks[layer_name])
+        x, new_st = db.residual_blocks[i](
+            x, 
+            ps.residual_blocks[layer_name],
+            st.residual_blocks[layer_name]
+        )
         # Don't use push! on vector because it invokes Zygote error
         skips = (skips..., x)
         @set! st.residual_blocks[layer_name] = new_st
@@ -204,15 +207,18 @@ function (up::UpBlock)(
     x, 
     ps,
     st::NamedTuple
-) where {T <: AbstractFloat, N <: Int}
+)
 
     x, skips = x
     x, _ = up.upsample(x, ps.upsample, st.upsample)
     for i in 1:length(up.residual_blocks)
         layer_name = Symbol(:layer_, i)
         x = cat(x, skips[end - i + 1]; dims=3) # cat on channel
-        x, new_st = up.residual_blocks[i](x, ps.residual_blocks[layer_name],
-                                          st.residual_blocks[layer_name])
+        x, new_st = up.residual_blocks[i](
+            x, 
+            ps.residual_blocks[layer_name],
+            st.residual_blocks[layer_name]
+        )
         @set! st.residual_blocks[layer_name] = new_st
     end
 
@@ -320,6 +326,7 @@ function (unet::UNet)(
         layer_name = Symbol(:layer_, i)
         (x, skips), new_st = unet.down_blocks[i](x, ps.down_blocks[layer_name],
                                                  st.down_blocks[layer_name])
+        #x = leakyrelu.(x)                                              
         @set! st.down_blocks[layer_name] = new_st
         skips_at_each_stage = (skips_at_each_stage..., skips)
     end
@@ -331,6 +338,7 @@ function (unet::UNet)(
         layer_name = Symbol(:layer_, i)
         x, new_st = unet.up_blocks[i]((x, skips_at_each_stage[end - i + 1]),
                                       ps.up_blocks[layer_name], st.up_blocks[layer_name])
+        #x = leakyrelu.(x)
         @set! st.up_blocks[layer_name] = new_st
     end
 
