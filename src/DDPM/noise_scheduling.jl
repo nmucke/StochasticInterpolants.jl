@@ -25,31 +25,7 @@ function get_beta_schedule(
     end
 end
 
-"""
-    get_index_from_list
 
-Returns the value of a list at a given index.
-
-This function is used to get the value of a list at a given index, 
-where the index is a tensor of batch indices.
-"""
-function get_index_from_list(
-    vals, 
-    t, 
-    x_shape
-)
-    batch_size = size(t)[1]
-    out = vals[t]
-    
-    return reshape(out, (batch_size, (1,) * (length(x_shape) - 1)))
-end
-
-
-"""
-    forward_diffusion_sample
-
-Takes an image and a timestep as input and returns the noisy version of it.
-"""
 function forward_diffusion_sample(
     x_0,
     t,
@@ -61,11 +37,13 @@ function forward_diffusion_sample(
     image_shape = size(x_0)
 
     noise = randn(rng, image_shape...) |> dev
-    sqrt_alphas_cumprod_t = noise_scheduling.sqrt_alphas_cumprod[t]
-    sqrt_one_minus_alphas_cumprod_t = noise_scheduling.sqrt_one_minus_alphas_cumprod[t]
 
-    sqrt_alphas_cumprod_t = reshape(sqrt_alphas_cumprod_t, (1, 1, 1, size(x_0)[end]))
-    sqrt_one_minus_alphas_cumprod_t = reshape(sqrt_one_minus_alphas_cumprod_t, (1, 1, 1, size(x_0)[end]))
+    #CUDA.@allowscalar sqrt_alphas_cumprod_t = noise_scheduling.sqrt_alphas_cumprod[t]
+    #CUDA.@allowscalar sqrt_one_minus_alphas_cumprod_t = noise_scheduling.sqrt_one_minus_alphas_cumprod[t]
+
+    sqrt_alphas_cumprod_t = reshape(noise_scheduling.sqrt_alphas_cumprod[t], (1, 1, 1, size(x_0)[end]))
+    sqrt_one_minus_alphas_cumprod_t = reshape(noise_scheduling.sqrt_one_minus_alphas_cumprod[t], (1, 1, 1, size(x_0)[end]))
+
     
     return sqrt_alphas_cumprod_t .* x_0 + sqrt_one_minus_alphas_cumprod_t .* noise, noise
 end
@@ -75,6 +53,18 @@ end
     NoiseScheduling
 
 A struct to hold the noise scheduling parameters.
+
+This struct holds the parameters for the noise scheduling process.
+
+# Fields
+- `betas::Vector{T}`: The beta values.
+- `alphas::Vector{T}`: The alpha values.
+- `alphas_cumprod::Vector{T}`: The cumulative product of the alpha values.
+- `alphas_cumprod_prev::Vector{T}`: The cumulative product of the alpha values, shifted by one.
+- `sqrt_recip_alphas::Vector{T}`: The square root of the reciprocal of the alpha values.
+- `sqrt_alphas_cumprod::Vector{T}`: The square root of the cumulative product of the alpha values.
+- `sqrt_one_minus_alphas_cumprod::Vector{T}`: The square root of one minus the cumulative product of the alpha values.
+- `posterior_variance::Vector{T}`: The posterior variance.
 """
 struct NoiseScheduling
     betas
@@ -92,21 +82,22 @@ function get_noise_scheduling(
     timesteps, 
     init_beta, 
     final_beta,
-    type
+    type,
+    dev=gpu
 )
 
-    betas = get_beta_schedule(timesteps, init_beta, final_beta, type)
+    betas = collect(get_beta_schedule(timesteps, init_beta, final_beta, type)) |> dev
 
-    alphas = 1.0 .- betas
+    alphas = 1.0 .- betas |> dev
 
-    alphas_cumprod = cumprod(alphas)
-    alphas_cumprod_prev = vcat([1.0], alphas_cumprod[1:end-1])
+    alphas_cumprod = cumprod(alphas) |> dev
+    CUDA.@allowscalar alphas_cumprod_prev = vcat([1.0], alphas_cumprod[1:end-1]) |> dev
 
-    sqrt_recip_alphas = sqrt.(1.0 ./ alphas)
-    sqrt_alphas_cumprod = sqrt.(alphas_cumprod)
-    sqrt_one_minus_alphas_cumprod = sqrt.(1.0 .- alphas_cumprod)
+    sqrt_recip_alphas = sqrt.(1.0 ./ alphas) |> dev
+    sqrt_alphas_cumprod = sqrt.(alphas_cumprod) |> dev
+    sqrt_one_minus_alphas_cumprod = sqrt.(1.0 .- alphas_cumprod) |> dev
 
-    posterior_variance = betas .* (1. .- alphas_cumprod_prev) ./ (1. .- alphas_cumprod)
+    posterior_variance = betas .* (1. .- alphas_cumprod_prev) ./ (1. .- alphas_cumprod) |> dev
     
     return NoiseScheduling(
         betas,

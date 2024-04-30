@@ -43,6 +43,14 @@ export forward_diffusion_sample
 export get_noise_scheduling
 export NoiseScheduling
 
+# Loss
+include("DDPM/loss.jl")
+export get_loss
+
+# Sampling
+include("DDPM/sampling.jl")
+export sample_timestep
+
 
 
 

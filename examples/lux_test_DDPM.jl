@@ -11,6 +11,7 @@ using Zygote
 using LuxCUDA
 using Images
 using ImageFiltering
+using Printf
 
 rng = Random.default_rng()
 Random.seed!(rng, 0)
@@ -19,7 +20,7 @@ Random.seed!(rng, 0)
 dev = gpu_device()
 
 ##### Hyperparameters #####
-num_train = 5000;
+num_train = 10000;
 in_channels = 1;
 out_channels = 1;
 kernel_size = (3, 3);
@@ -49,25 +50,112 @@ H, W = size(trainset)[1:2];
 image_size = (H, W);
 
 ##### Noise Scheduler #####
-timesteps = 170;
+timesteps = 500;
 noise_scheduling = get_noise_scheduling(
     timesteps,
     0.0001,
     0.02,
-    "linear"
+    "linear",
+    dev
 );
 
-x0 = trainset[:, :, :, 1:5];
-for i in 1:5
-    x0[:, :, :, i] = x0[:, :, :, 1] 
+dev = gpu
+
+in_channels = 1;
+out_channels = 1;
+kernel_size = (3, 3);
+embedding_dims = 16;
+
+H = 32;
+W = 32;
+image_size = (H, W);
+
+unet = UNet(image_size; in_channels=1, channels=[16, 32, 64, 128], embedding_dims=embedding_dims);
+ps, st = Lux.setup(rng, unet) .|> dev;
+
+
+opt = Optimisers.Adam(1e-4, (0.9f0, 0.99f0), 1e-8);
+opt_state = Optimisers.setup(opt, ps);
+
+for epoch in 1:1000
+    running_loss = 0.0
+    for i in 1:batch_size:size(trainset)[end]  
+
+        if i + batch_size - 1 > size(trainset)[end]
+            break
+        end
+
+        x = trainset[:, :, :, i:i+batch_size-1] |> dev;
+        t = rand(rng, 1:timesteps, (batch_size,)) |> dev;
+
+        # loss, st = get_loss(x, t, noise_scheduling, unet, ps, st, rng, dev)
+
+        (loss, st), pb_f = Zygote.pullback(
+            p -> get_loss(x, t, noise_scheduling, unet, p, st, rng, dev), 
+            ps
+        );
+
+        running_loss += loss
+
+        gs = pb_f((one(loss), nothing))[1];
+        
+        opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+    end
+
+    running_loss /= floor(Int, size(trainset)[end] / batch_size)
+    
+    (epoch % 5 == 1 || epoch == 100) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+
+    if epoch % 5 == 1 || epoch == 100
+
+        x = randn(rng, Float32, 32, 32, 1, 1) |> dev
+        for i in 1:timesteps
+            t = [i] |> dev
+            x, st = sample_timestep(x, t, unet, noise_scheduling, ps, st, rng, dev)
+        end
+
+        x = clamp!(x, 0, 1)
+        
+        x = Array(x)
+        
+        heatmap(x[:, :, 1, 1])
+        #save(joinpath(output_dir, @sprintf("img_%.3d_epoch_%.4d.png", i, epoch)), img)
+
+        save_dir = joinpath("output/train/images/", @sprintf("img_%i.png", epoch))
+        savefig(save_dir)
+    end
+
 end
 
-t = [10, 40, 80, 120, 160];
+x = randn(rng, Float32, 32, 32, 1, 1) |> dev
+for i in 1:timesteps
+    t = [i] |> dev
+    img, st = sample_timestep(
+        x, 
+        t,
+        unet,
+        noise_scheduling,
+        ps,
+        st,
+        dev
+    )
+end
 
-x_noised, _ = forward_diffusion_sample(
-    x0, 
-    t,
-    rng,
-    noise_scheduling,
-    cpu_device(),
-);
+x = Array(x)
+heatmap(x[:,:,1,1])
+
+
+
+
+
+
+function heatgif(A)
+    p = heatmap(A[:,:,1,1])
+    anim = @animate for i=1:size(A,4)
+        heatmap!(p[1], A[:,:,1,i])
+    end
+    return anim
+end
+
+anim = heatgif(x_noisy)
+gif(anim, "anim.gif", fps = 15)

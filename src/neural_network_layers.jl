@@ -21,10 +21,11 @@ range and embedding dimensions.
 Based on https://yng87.page/en/blog/2022/lux-ddim/.
 """
 function sinusoidal_embedding(
-    x::AbstractArray{T, 4}, 
+    x, 
     min_freq::T, 
     max_freq::T,
-    embedding_dims::Int
+    embedding_dims::Int,
+    dev=gpu
 ) where {T <: AbstractFloat}
 
     if size(x)[1:3] != (1, 1, 1)
@@ -38,7 +39,7 @@ function sinusoidal_embedding(
     upper = log(max_freq)
     n = div(embedding_dims, 2)
     d = (upper - lower) / (n - 1)
-    freqs = exp.(lower:d:upper) |> gpu
+    freqs = exp.(lower:d:upper) |> dev
     @assert length(freqs) == div(embedding_dims, 2)
     @assert size(freqs) == (div(embedding_dims, 2),)
 
@@ -297,10 +298,10 @@ function UNet(
 end
 
 function (unet::UNet)(
-    x::Tuple{AbstractArray{T, 4}, AbstractArray{T, 4}}, 
+    x::Tuple{AbstractArray{T, 4}, AbstractArray{S, 4}}, 
     ps::NamedTuple,
     st::NamedTuple
-) where {T <: AbstractFloat}
+) where {T <: AbstractFloat, S <: Any}
 
     noisy_images, noise_variances = x
     @assert size(noise_variances)[1:3] == (1, 1, 1)
