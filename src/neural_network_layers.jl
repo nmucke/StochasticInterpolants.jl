@@ -89,9 +89,9 @@ function residual_block(
         SkipConnection(
             Chain(
                 BatchNorm(out_channels),
-                Conv(kernel_size, out_channels => out_channels; stride=1,pad=(1, 1)), 
+                Conv(kernel_size, out_channels => out_channels; stride=1, pad=(1, 1)), 
                 swish,
-                Conv(kernel_size, out_channels => out_channels; stride=1,pad=(1, 1))
+                Conv(kernel_size, out_channels => out_channels; stride=1, pad=(1, 1))
             ), +
         )
     )

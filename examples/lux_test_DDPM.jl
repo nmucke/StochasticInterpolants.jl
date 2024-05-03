@@ -12,150 +12,158 @@ using LuxCUDA
 using Images
 using ImageFiltering
 using Printf
+using Statistics
 
+Plots.default(linewidth=1, label=nothing, grid=false, tickfontsize=4, size = (1000, 700))
+
+# Set the seed
 rng = Random.default_rng()
 Random.seed!(rng, 0)
 
 # Get the device determined by Lux
 dev = gpu_device()
+cpu_dev = LuxCPUDevice()
 
 ##### Hyperparameters #####
-num_train = 10000;
-in_channels = 1;
-out_channels = 1;
-kernel_size = (3, 3);
-embedding_dims = 4;
-batch_size = 256;
-learning_rate = 1e-3;
-weight_decay = 1e-10;
-
-######load training set #####
-trainset = MNIST(:train)
-trainset = trainset[1:num_train];
-trainset = trainset.features;
-
-# Reshape and move to device
-trainset = reshape(trainset, 28, 28, 1, num_train);
-
-# Interpolate onto 32 x 32
-_trainset = zeros(Float32, 32, 32, 1, num_train);
-
-for i in 1:num_train
-    _trainset[:, :, 1, i] = imresize(trainset[:, :, 1, i], (32, 32));
-end
-
-trainset = _trainset;
-
-H, W = size(trainset)[1:2];
-image_size = (H, W);
-
-##### Noise Scheduler #####
-timesteps = 500;
-noise_scheduling = get_noise_scheduling(
-    timesteps,
-    0.0001,
-    0.02,
-    "linear",
-    dev
-);
-
-dev = gpu
-
-in_channels = 1;
-out_channels = 1;
+num_train = 1000;
 kernel_size = (3, 3);
 embedding_dims = 16;
+batch_size = 32;
+learning_rate = 1e-4;
+weight_decay = 1e-10;
+timesteps = 500;
 
-H = 32;
-W = 32;
+######load training set #####
+#trainset = MNIST(:train)
+# trainset = CIFAR10(:train)
+# trainset = trainset[1:num_train];
+# trainset = trainset.features;
+
+
+num_train = 200*5;
+data_train = load("data/turbulence.jld2", "data_train");
+#data_train[1].data[1].u[200][2]
+H, W = size(data_train[1].data[1].u[1][1]).-2;
+trainset = zeros(H, W, 2, 200*5);
+for i in 1:5
+    for j in 1:200
+        trainset[:, :, 1, (i-1)*200 + j] = data_train[i].data[1].u[j][1][2:end-1, 2:end-1]
+        trainset[:, :, 2, (i-1)*200 + j] = data_train[i].data[1].u[j][2][2:end-1, 2:end-1]
+    end
+end
+
+trainset[:, :, 1, :] = (trainset[:, :, 1, :] .- mean(trainset[:, :, 1, :])) ./ std(trainset[:, :, 1, :]);
+trainset[:, :, 2, :] = (trainset[:, :, 2, :] .- mean(trainset[:, :, 2, :])) ./ std(trainset[:, :, 2, :]);
+
+random_indices = rand(rng, 1:1000, 9);
+
+x = trainset[:, :, :, random_indices];
+x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2);
+Plots.heatmap(x[:, :, 5])
+plot_list = []
+for i in 1:9
+    push!(plot_list, heatmap(x[:, :, i])); 
+end
+
+savefig(plot(plot_list..., layout=(3,3)), "lol.pdf");
+
+
+H, W, C = size(trainset)[1:3];
 image_size = (H, W);
+in_channels = C;
+out_channels = C;
 
-unet = UNet(image_size; in_channels=1, channels=[16, 32, 64, 128], embedding_dims=embedding_dims);
+trainset = reshape(trainset, H, W, C, num_train);
+
+
+##### Noise Scheduler #####
+noise_scheduling = get_noise_scheduling(
+    timesteps;
+    init_beta=1e-4,
+    final_beta=2e-2,
+    type="linear",
+    dev=dev
+);
+
+unet = UNet(image_size; in_channels=C, channels=[16, 32, 64, 128], embedding_dims=embedding_dims, block_depth=2);
 ps, st = Lux.setup(rng, unet) .|> dev;
 
 
-opt = Optimisers.Adam(1e-4, (0.9f0, 0.99f0), 1e-8);
+opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
 for epoch in 1:1000
     running_loss = 0.0
-    for i in 1:batch_size:size(trainset)[end]  
+    for i in 1:batch_size:size(trainset)[end]
+        
+        CUDA.reclaim()
 
         if i + batch_size - 1 > size(trainset)[end]
             break
         end
 
         x = trainset[:, :, :, i:i+batch_size-1] |> dev;
-        t = rand(rng, 1:timesteps, (batch_size,)) |> dev;
-
-        # loss, st = get_loss(x, t, noise_scheduling, unet, ps, st, rng, dev)
+        t = rand(rng, 0:timesteps-1, (batch_size,)) |> dev;
 
         (loss, st), pb_f = Zygote.pullback(
             p -> get_loss(x, t, noise_scheduling, unet, p, st, rng, dev), 
             ps
         );
-
         running_loss += loss
 
         gs = pb_f((one(loss), nothing))[1];
         
         opt_state, ps = Optimisers.update!(opt_state, ps, gs)
-    end
 
+    end
+      
     running_loss /= floor(Int, size(trainset)[end] / batch_size)
     
-    (epoch % 5 == 1 || epoch == 100) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+    (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
-    if epoch % 5 == 1 || epoch == 100
+    if epoch % 25 == 0
 
-        x = randn(rng, Float32, 32, 32, 1, 1) |> dev
-        for i in 1:timesteps
-            t = [i] |> dev
-            x, st = sample_timestep(x, t, unet, noise_scheduling, ps, st, rng, dev)
+        x = randn(rng, Float32, image_size..., C, 9) |> dev
+        for j in timesteps-1:-1:0
+            t = j .* ones(Int64, 9) |> dev
+            x, st = sample_timestep(
+                x, t; 
+                model=unet, noise_scheduling=noise_scheduling, ps=ps, st=st, rng=rng, dev=dev
+            )
         end
 
-        x = clamp!(x, 0, 1)
+        #x = clamp!(x, 0, 1)
         
-        x = Array(x)
-        
-        heatmap(x[:, :, 1, 1])
-        #save(joinpath(output_dir, @sprintf("img_%.3d_epoch_%.4d.png", i, epoch)), img)
+        x = x |> cpu_dev
+        x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)               
 
-        save_dir = joinpath("output/train/images/", @sprintf("img_%i.png", epoch))
-        savefig(save_dir)
+        plot_list = []
+        for i in 1:9
+            push!(plot_list, heatmap(x[:, :, i])); 
+        end
+
+        save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
+        savefig(plot(plot_list..., layout=(3,3)), save_dir)
+
     end
 
 end
 
-x = randn(rng, Float32, 32, 32, 1, 1) |> dev
-for i in 1:timesteps
-    t = [i] |> dev
-    img, st = sample_timestep(
-        x, 
-        t,
-        unet,
-        noise_scheduling,
-        ps,
-        st,
-        dev
-    )
-end
+# x = randn(rng, Float32, image_size..., C, 1) |> dev;
+# for i in timesteps:-1:1
+#     t = [i] |> dev
+#     x, st = sample_timestep(
+#         x, t; model=unet, noise_scheduling=noise_scheduling, ps=ps, st=st, rng=rng, dev=dev)
+# end
+# x = Array(x);
 
-x = Array(x)
-heatmap(x[:,:,1,1])
+# function heatgif(A)
+#     p = heatmap(A[:,:,1,1])
+#     anim = @animate for i=1:size(A,4)
+#         heatmap!(p[1], A[:,:,1,i])
+#     end
+#     return anim
+# end
 
-
-
-
-
-
-function heatgif(A)
-    p = heatmap(A[:,:,1,1])
-    anim = @animate for i=1:size(A,4)
-        heatmap!(p[1], A[:,:,1,i])
-    end
-    return anim
-end
-
-anim = heatgif(x_noisy)
-gif(anim, "anim.gif", fps = 15)
+# anim = heatgif(x_noisy)
+# gif(anim, "anim.gif", fps = 15)

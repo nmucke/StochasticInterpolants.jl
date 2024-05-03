@@ -35,7 +35,6 @@ function sample_timestep(
     dev=gpu
 )
 
-    t_idx = t .+ 1
 
     if length(size(t)) == 4
         
@@ -52,10 +51,10 @@ function sample_timestep(
     end
 
     # Get noise scheduling parameters
-    betas_t = noise_scheduling.betas[t_idx]
-    sqrt_one_minus_alphas_cumprod_t = noise_scheduling.sqrt_one_minus_alphas_cumprod[t_idx]    
-    sqrt_recip_alphas_t = noise_scheduling.sqrt_recip_alphas[t_idx]
-    posterior_variance_t = noise_scheduling.posterior_variance[t_idx]
+    betas_t = noise_scheduling.betas[t]
+    sqrt_one_minus_alphas_cumprod_t = noise_scheduling.sqrt_one_minus_alphas_cumprod[t]    
+    sqrt_recip_alphas_t = noise_scheduling.sqrt_recip_alphas[t]
+    posterior_variance_t = noise_scheduling.posterior_variance[t]
 
     # Reshape noise scheduling parameters
     betas_t = reshape(betas_t, (1, 1, 1, size(x)[end]))

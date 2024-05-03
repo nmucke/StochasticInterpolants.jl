@@ -110,15 +110,14 @@ function forward_diffusion_sample(
     noise_scheduling::NoiseScheduling,
     dev=gpu,
 )
-    t_idx = t .+ 1
 
     noise = randn(rng, size(x_0)...) |> dev
     sqrt_alphas_cumprod_t = reshape(
-        noise_scheduling.sqrt_alphas_cumprod[t_idx], 
+        noise_scheduling.sqrt_alphas_cumprod[t], 
         (1, 1, 1, size(x_0)[end])
     )
     sqrt_one_minus_alphas_cumprod_t = reshape(
-        noise_scheduling.sqrt_one_minus_alphas_cumprod[t_idx], 
+        noise_scheduling.sqrt_one_minus_alphas_cumprod[t], 
         (1, 1, 1, size(x_0)[end])
     )
     
