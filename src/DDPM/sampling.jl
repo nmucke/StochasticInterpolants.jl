@@ -77,5 +77,29 @@ function sample_timestep(
     end
 end
 
+function sample(
+    model, 
+    noise_scheduling::NoiseScheduling,
+    ps::NamedTuple,
+    st::NamedTuple,
+    rng::AbstractRNG,
+    timesteps,
+    num_samples::Int64, 
+    dev
+)
+
+    x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
+    for j in timesteps-1:-1:0
+        t = j .* ones(Int64, num_samples) |> dev
+        x, st = sample_timestep(
+            x, t; 
+            model=model, noise_scheduling=noise_scheduling, ps=ps, st=st, rng=rng, dev=dev
+        )
+    end
+
+
+    return x
+end
+
 
 

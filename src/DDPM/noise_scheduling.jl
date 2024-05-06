@@ -59,7 +59,7 @@ function get_noise_scheduling(
     init_beta::AbstractFloat=1e-4, 
     final_beta::AbstractFloat=2e-2,
     type::String="linear",
-    dev=gpu
+    dev=gpu_device()
 )
 
     betas = collect(get_beta_schedule(
@@ -108,7 +108,7 @@ function forward_diffusion_sample(
     t::AbstractArray,
     rng::AbstractRNG,
     noise_scheduling::NoiseScheduling,
-    dev=gpu,
+    dev=gpu_device(),
 )
     t_idx = t .+ 1
 

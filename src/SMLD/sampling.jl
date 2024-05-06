@@ -9,72 +9,55 @@ using LuxCUDA
 
 
 """
-    sample_timestep(
-        x::AbstractArray, 
-        t::AbstractArray;
-        model,
-        noise_scheduling::NoiseScheduling,
+    Euler_Maruyama_sampler(
+        model::ScoreMatchingLangevinDynamics,
+        marginal_probability_std::Function,
         ps::NamedTuple,
         st::NamedTuple,
         rng::AbstractRNG,
+        num_samples::Int,
+        num_steps::Int,
+        eps::Float32,
         dev=gpu
     )
 
-Calls the model to predict the noise in the image and returns 
-the denoised image. 
-Applies noise to this image, if we are not in the last step yet.
+    Samples from the SMLD model using the Euler-Maruyama method
 """
-function sample_timestep(
-    x::AbstractArray, 
-    t::AbstractArray;
-    model,
-    noise_scheduling::NoiseScheduling,
+function euler_maruyama_sampler(
+    model::UNet,
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
+    marginal_probability_std::Function,
+    diffusion_coefficient::Function,
+    num_samples::Int,
+    num_steps::Int,
+    eps::AbstractFloat,
     dev=gpu
 )
+    t = ones((1, 1, 1, num_samples)) |> dev
+    x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
+    x = x .* Float32.(marginal_probability_std(t))
+    timesteps = LinRange(1, eps, num_steps)# |> dev
+    step_size = Float32.(timesteps[1] - timesteps[2]) |> dev
 
+    for t in timesteps
+        batch_time_step = ones((1, 1, 1, num_samples)) * t |> dev
 
-    if length(size(t)) == 4
-        
-        # Call model (current image - noise prediction)
-        noise_pred, st = model((x, t), ps, st)
+        g = Float32.(diffusion_coefficient(batch_time_step))
 
-        t = t[1, 1, 1, :]
+        score, st = model((x, batch_time_step), ps, st)
 
-    else
+        mean_x = x + (g.^2) .* score .* step_size
 
-        # Call model (current image - noise prediction)
-        noise_pred, st = model((x, reshape(t, 1, 1, 1, length(t))), ps, st)
+        z = randn(rng, size(x)) |> dev
 
+        x = mean_x .+ sqrt.(step_size) .* g .* z  
     end
 
-    # Get noise scheduling parameters
-    betas_t = noise_scheduling.betas[t]
-    sqrt_one_minus_alphas_cumprod_t = noise_scheduling.sqrt_one_minus_alphas_cumprod[t]    
-    sqrt_recip_alphas_t = noise_scheduling.sqrt_recip_alphas[t]
-    posterior_variance_t = noise_scheduling.posterior_variance[t]
-
-    # Reshape noise scheduling parameters
-    betas_t = reshape(betas_t, (1, 1, 1, size(x)[end]))
-    sqrt_one_minus_alphas_cumprod_t = reshape(sqrt_one_minus_alphas_cumprod_t, (1, 1, 1, size(x)[end]))
-    sqrt_recip_alphas_t = reshape(sqrt_recip_alphas_t, (1, 1, 1, size(x)[end]))
-    posterior_variance_t = reshape(posterior_variance_t, (1, 1, 1, size(x)[end]))
-    
-    model_mean = sqrt_recip_alphas_t .* (
-        x - betas_t .*  noise_pred ./ sqrt_one_minus_alphas_cumprod_t
-    )
-    
-    if t == 0
-        # As pointed out by Luis Pereira (see YouTube comment)
-        # The t's are offset from the t's in the paper
-        return model_mean, st
-    else
-        noise = randn(rng, size(x)) |> dev
-        return model_mean .+ sqrt.(posterior_variance_t) .* noise, st
-    end
+    return x
 end
+
 
 
 

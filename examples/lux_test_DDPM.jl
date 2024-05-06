@@ -14,15 +14,15 @@ using ImageFiltering
 using Printf
 using Statistics
 
-Plots.default(linewidth=1, label=nothing, grid=false, tickfontsize=4, size = (1000, 700))
+Plots.default(linewidth=1, label=nothing, grid=false, tickfontsize=4, size = (1000, 700));
 
 # Set the seed
-rng = Random.default_rng()
-Random.seed!(rng, 0)
+rng = Random.default_rng();
+Random.seed!(rng, 0);
 
 # Get the device determined by Lux
-dev = gpu_device()
-cpu_dev = LuxCPUDevice()
+dev = gpu_device();
+cpu_dev = LuxCPUDevice();
 
 ##### Hyperparameters #####
 num_train = 1000;
@@ -31,9 +31,11 @@ embedding_dims = 16;
 batch_size = 32;
 learning_rate = 1e-4;
 weight_decay = 1e-8;
-timesteps = 1000;
+timesteps = 100;
+num_epochs = 1000;
+num_samples = 9;
 
-######load training set #####
+###### load training set #####
 #trainset = MNIST(:train)
 # trainset = CIFAR10(:train)
 # trainset = trainset[1:num_train];
@@ -60,7 +62,7 @@ random_indices = rand(rng, 1:1000, 9);
 x = trainset[:, :, :, random_indices];
 x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2);
 Plots.heatmap(x[:, :, 5])
-plot_list = []
+plot_list = [];
 for i in 1:9
     push!(plot_list, heatmap(x[:, :, i])); 
 end
@@ -75,80 +77,103 @@ out_channels = C;
 
 trainset = reshape(trainset, H, W, C, num_train);
 
-
-##### Noise Scheduler #####
-noise_scheduling = get_noise_scheduling(
-    timesteps;
-    init_beta=1e-4,
-    final_beta=2e-2,
-    type="linear",
-    dev=dev
+##### DDPM model #####
+ddpm = DenoisingDiffusionProbabilisticModel(
+    image_size; 
+    in_channels=C, channels=[16, 32, 64, 128], embedding_dims=embedding_dims, block_depth=2,
+    timesteps=timesteps
 );
+ps, st = Lux.setup(rng, ddpm) .|> dev;
 
-unet = UNet(image_size; in_channels=C, channels=[16, 32, 64, 128], embedding_dims=embedding_dims, block_depth=2);
-ps, st = Lux.setup(rng, unet) .|> dev;
-
-
+##### Optimizer #####
 opt = Optimisers.Adam(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
-for epoch in 1:1000
-    running_loss = 0.0
-    for i in 1:batch_size:size(trainset)[end]
+##### Train DDPM #####
+train_diffusion_model(
+    ddpm,
+    ps,
+    st,
+    opt_state,
+    trainset,
+    num_epochs,
+    batch_size,
+    num_samples,
+    rng,
+)
+
+
+
+
+
+
+
+
+# num_samples = 9;
+# for epoch in 1:1000
+#     running_loss = 0.0
+
+#     # Shuffle trainset
+#     train_ids = shuffle(rng, 1:num_train)
+#     trainset = trainset[:, :, :, train_ids]
+  
+#     for i in 1:batch_size:size(trainset)[end]
+        
+#         if i + batch_size - 1 > size(trainset)[end]
+#             break
+#         end
+
+#         x = trainset[:, :, :, i:i+batch_size-1] |> dev;
+#         t = rand(rng, 0:timesteps-1, (batch_size,)) |> dev;
+
+#         (loss, st), pb_f = Zygote.pullback(
+#             p -> get_loss(x, t, ddpm, p, st, rng, dev), 
+#             ps
+#         );
+#         running_loss += loss
+
+#         gs = pb_f((one(loss), nothing))[1];
+        
+#         opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+        
+#         # GC.gc()
+#         CUDA.reclaim()
         
 
-        if i + batch_size - 1 > size(trainset)[end]
-            break
-        end
-
-        x = trainset[:, :, :, i:i+batch_size-1] |> dev;
-        t = rand(rng, 0:timesteps-1, (batch_size,)) |> dev;
-
-        (loss, st), pb_f = Zygote.pullback(
-            p -> get_loss(x, t, noise_scheduling, unet, p, st, rng, dev), 
-            ps
-        );
-        running_loss += loss
-
-        gs = pb_f((one(loss), nothing))[1];
-        
-        opt_state, ps = Optimisers.update!(opt_state, ps, gs)
-
-        CUDA.reclaim()
-
-    end
+#     end
       
-    running_loss /= floor(Int, size(trainset)[end] / batch_size)
+#     running_loss /= floor(Int, size(trainset)[end] / batch_size)
     
-    (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+#     (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
-    if epoch % 50 == 0
+#     if epoch % 50 == 0
 
-        x = randn(rng, Float32, image_size..., C, 9) |> dev
-        for j in timesteps-1:-1:0
-            t = j .* ones(Int64, 9) |> dev
-            x, st = sample_timestep(
-                x, t; 
-                model=unet, noise_scheduling=noise_scheduling, ps=ps, st=st, rng=rng, dev=dev
-            )
-        end
+#         # x = randn(rng, Float32, image_size..., C, 9) |> dev
+#         # for j in timesteps-1:-1:0
+#         #     t = j .* ones(Int64, 9) |> dev
+#         #     x, st = sample_timestep(
+#         #         x, t; 
+#         #         model=unet, noise_scheduling=noise_scheduling, ps=ps, st=st, rng=rng, dev=dev
+#         #     )
+#         # end
 
-        #x = clamp!(x, 0, 1)
+#         x = ddpm.sample(num_samples, ps, st, rng, dev)
+#         #x = clamp!(x, 0, 1)
         
-        x = x |> cpu_dev
-        x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)   
+#         x = x |> cpu_dev
+#         x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)   
 
-        plot_list = []
-        for i in 1:9
-            push!(plot_list, heatmap(x[:, :, i])); 
-        end
+#         plot_list = []
+#         for i in 1:9
+#             push!(plot_list, heatmap(x[:, :, i])); 
+#         end
 
-        save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
-        savefig(plot(plot_list..., layout=(3,3)), save_dir)
+#         save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
+#         savefig(plot(plot_list..., layout=(3,3)), save_dir)
 
-    end
+#     end
 
-end
+# end
 
 # x = randn(rng, Float32, image_size..., C, 1) |> dev;
 # for i in timesteps:-1:1
