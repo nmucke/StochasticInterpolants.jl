@@ -26,12 +26,12 @@ cpu_dev = LuxCPUDevice()
 
 ##### Hyperparameters #####
 num_train = 1000;
-kernel_size = (3, 3);
+kernel_size = (5, 5);
 embedding_dims = 16;
 batch_size = 32;
 learning_rate = 1e-4;
-weight_decay = 1e-10;
-timesteps = 500;
+weight_decay = 1e-8;
+timesteps = 1000;
 
 ######load training set #####
 #trainset = MNIST(:train)
@@ -89,14 +89,13 @@ unet = UNet(image_size; in_channels=C, channels=[16, 32, 64, 128], embedding_dim
 ps, st = Lux.setup(rng, unet) .|> dev;
 
 
-opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
+opt = Optimisers.Adam(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
 for epoch in 1:1000
     running_loss = 0.0
     for i in 1:batch_size:size(trainset)[end]
         
-        CUDA.reclaim()
 
         if i + batch_size - 1 > size(trainset)[end]
             break
@@ -115,13 +114,15 @@ for epoch in 1:1000
         
         opt_state, ps = Optimisers.update!(opt_state, ps, gs)
 
+        CUDA.reclaim()
+
     end
       
     running_loss /= floor(Int, size(trainset)[end] / batch_size)
     
     (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
-    if epoch % 25 == 0
+    if epoch % 50 == 0
 
         x = randn(rng, Float32, image_size..., C, 9) |> dev
         for j in timesteps-1:-1:0
@@ -135,7 +136,7 @@ for epoch in 1:1000
         #x = clamp!(x, 0, 1)
         
         x = x |> cpu_dev
-        x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)               
+        x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)   
 
         plot_list = []
         for i in 1:9

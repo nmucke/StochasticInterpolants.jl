@@ -28,6 +28,3 @@ function get_loss(
     noise_pred, st = model((x_noisy, t), ps, st)
     return mean(abs.(noise .- noise_pred).^2), st
 end
-
-
-
