@@ -63,7 +63,7 @@ export get_loss
 
 ##### SMLD #####
 include("SMLD/models.jl")
-include("SMLD/noise_scheduling.jl")
+include("SMLD/SDE.jl")
 include("SMLD/loss.jl")
 include("SMLD/sampling.jl")
 

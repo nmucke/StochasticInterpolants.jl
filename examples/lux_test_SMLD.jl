@@ -27,9 +27,9 @@ cpu_dev = LuxCPUDevice();
 ##### Hyperparameters #####
 num_train = 1000;
 kernel_size = (5, 5);
-embedding_dims = 16;
+embedding_dims = 4;
 batch_size = 32;
-learning_rate = 1e-4;
+learning_rate = 1e-3;
 weight_decay = 1e-8;
 timesteps = 100;
 num_epochs = 10000;
@@ -80,7 +80,7 @@ trainset = reshape(trainset, H, W, C, num_train);
 ##### DDPM model #####
 model = ScoreMatchingLangevinDynamics(
     image_size; 
-    in_channels=C, channels=[16, 32, 64, 128], embedding_dims=embedding_dims, block_depth=2,
+    in_channels=C, channels=[4, 8, 16, 32, 64], embedding_dims=embedding_dims, block_depth=2,
 );
 ps, st = Lux.setup(rng, model) .|> dev;
 
@@ -101,3 +101,5 @@ train_diffusion_model(
     num_samples,
     rng,
 )
+
+
