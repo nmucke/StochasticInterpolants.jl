@@ -31,18 +31,17 @@ function get_loss(
 
     t = t  .* (1 .- model.eps) .+ model.eps  
 
-    if length(size(t)) == 1
-        t = reshape(t, (1, 1, 1, size(t)[1]))
-    end
+    # if length(size(t)) == 1
+    t = reshape(t, (1, 1, 1, size(t)[end]))
 
     z = randn(rng, size(x_0)) |> dev
 
-    std_ = model.marginal_probability_std(t) |> dev
+    marginal_std = model.marginal_probability_std(t)
 
-    perturbed_x_0 = x_0 .+ z .* std_
+    perturbed_x_0 = x_0 .+ z .* marginal_std
 
     score, st = model.unet((perturbed_x_0, t), ps, st)
 
-    return mean((score .* std_ .+ z).^2), st
+    return mean((score .* marginal_std .+ z) .^ 2), st
 
 end

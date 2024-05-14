@@ -22,22 +22,6 @@ export sinusoidal_embedding
 include("training.jl")
 export train_diffusion_model
 
-##### DDIM #####
-# Models
-include("DDIM/models.jl")
-export DenoisingDiffusionImplicitModel
-export diffusion_schedules
-export denoise
-export reverse_diffusion
-export denormalize
-export generate
-
-# Training
-include("DDIM/training.jl")
-export compute_loss
-export train_step
-export train_DDIM
-
 ##### DDPM #####
 include("DDPM/noise_scheduling.jl")
 include("DDPM/sampling.jl")
@@ -63,14 +47,8 @@ export get_loss
 
 ##### SMLD #####
 include("SMLD/models.jl")
-include("SMLD/SDE.jl")
 include("SMLD/loss.jl")
 include("SMLD/sampling.jl")
-
-
-# Noise scheduling
-export marginal_probability_std
-export diffusion_coefficient
 
 # Loss
 export get_loss
@@ -80,6 +58,21 @@ export ScoreMatchingLangevinDynamics
 
 # Sampling
 export euler_maruyama_sampler
+export sde_sampler
+export ode_sampler
+
+
+##### SI #####
+include("SI/models.jl")
+include("SI/sampling.jl")
+include("SI/loss.jl")
+
+# Loss
+export get_loss
+
+# Models
+export StochasticInterpolant
+
 
 
 end

@@ -15,7 +15,6 @@ using Printf
 using Statistics
 
 
-
 function train_diffusion_model(
     model,
     ps::NamedTuple,
@@ -28,6 +27,14 @@ function train_diffusion_model(
     rng::AbstractRNG,
     dev=gpu
 )
+
+    # if typeof(model) == ScoreMatchingLangevinDynamics
+    #     get_t_batch(batch_size) = rand(rng, Float32, (batch_size,));
+
+    # elseif typeof(model) == DenoisingDiffusionProbabilisticModel
+    #     get_t_batch(batch_size) = rand(rng, 0:model.timesteps-1, (batch_size,));
+    # end
+
     cpu_dev = LuxCPUDevice();
 
     num_train = size(trainset)[end] 
@@ -46,12 +53,7 @@ function train_diffusion_model(
 
             x = trainset[:, :, :, i:i+batch_size-1] |> dev;
 
-            if typeof(model) == ScoreMatchingLangevinDynamics
-                t = rand(rng, Float32, (batch_size,)) |> dev;
-
-            elseif typeof(model) == DenoisingDiffusionProbabilisticModel
-                t = rand(rng, 0:model.timesteps-1, (batch_size,)) |> dev;
-            end
+            t = rand(rng, Float32, (batch_size,)) |> dev #get_t_batch(batch_size) |> dev;
 
             (loss, st), pb_f = Zygote.pullback(
                 p -> get_loss(x, t, model, p, st, rng, dev), ps
@@ -73,16 +75,40 @@ function train_diffusion_model(
         
         running_loss /= floor(Int, size(trainset)[end] / batch_size)
         
-        (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+        (epoch % 10 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
         if epoch % 50 == 0
 
             st_ = Lux.testmode(st)
+            x = model.sde_sample(num_samples, ps, st_, rng, dev)
+            
+            #x = model.sample(num_samples, ps, st_, rng, dev)
+            # x = randn(rng, Float32, model.unet.upsample.size..., model.unet.conv_in.in_chs, num_samples)
+            # x = x .* Float32.(model.marginal_probability_std(1.0)) |> dev
+            # t_span = (model.eps, 1.0)
 
-            x = model.sample(num_samples, ps, st_, rng, dev)
+            # dt = 0.001
+
+            # drift = Lux.Experimental.StatefulLuxLayer(model.unet, nothing, st_)
+
+            # dudt(u, p, t) = -model.diffusion_coefficient(t).^2 .* drift((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p) 
+            # g(u, p, t) = model.diffusion_coefficient(t) .* ones(size(u)) |> dev    #diffusion((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+
+            # ff = SDEFunction{false}(dudt, g)
+            # prob = SDEProblem{false}(ff, g, x, reverse(t_span), ps)
+
+            # sol = solve(
+            #     prob,
+            #     SRIW1(),
+            #     dt = -dt,
+            #     save_everystep = false,
+            #     adaptive = false
+            # )
+            # sol = sol[:, :, :, :, end]
+
             
             x = x |> cpu_dev
-            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)   
+            x = sqrt.(x[5:123, 5:123, 1, :].^2 + x[5:123, 5:123, 2, :].^2)   
 
             plot_list = []
             for i in 1:9
@@ -95,5 +121,7 @@ function train_diffusion_model(
         end
 
     end
+
+    return ps, st
 
 end
