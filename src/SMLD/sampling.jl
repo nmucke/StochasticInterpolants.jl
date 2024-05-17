@@ -60,7 +60,7 @@ end
 
 
 
-function sde_sampler(
+function smld_sde_sampler(
     model::UNet,
     ps::NamedTuple,
     st::NamedTuple,
@@ -80,8 +80,7 @@ function sde_sampler(
     t_span = (eps, 1.0)
 
     timesteps = LinRange(1, eps, num_steps)# |> dev
-    dt = Float32.(timesteps[1] - timesteps[2]) |> dev
-
+    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
     stateful_score_NN = Lux.Experimental.StatefulLuxLayer(model, nothing, st)
 
@@ -94,7 +93,7 @@ function sde_sampler(
     x = solve(
         prob,
         SRIW1(),
-        dt = -dt,
+        dt = dt,
         save_everystep = false,
         adaptive = false
     )
@@ -105,7 +104,7 @@ function sde_sampler(
 end
 
 
-function ode_sampler(
+function smld_ode_sampler(
     model::UNet,
     ps::NamedTuple,
     st::NamedTuple,
@@ -120,7 +119,7 @@ function ode_sampler(
 
             
     #x = model.sample(num_samples, ps, st_, rng, dev)
-    x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples)
+    x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
     x = x .* Float32.(marginal_probability_std(1.0)) |> dev
     t_span = (eps, 1.0)
 

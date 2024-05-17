@@ -12,15 +12,45 @@ using NNlib
 using Setfield
 using LuxCUDA
 
+
+##### Layers #####
 include("neural_network_layers.jl")
 export residual_block
 export UNet
 export UpBlock, DownBlock
 export sinusoidal_embedding
 
-# Training
+##### SI #####
+include("SI/interpolants.jl")
+include("SI/models.jl")
+include("SI/conditional_models.jl")
+include("SI/sampling.jl")
+include("SI/loss.jl")
+
+# Sampling
+export sde_sampler
+export ode_sampler
+
+# Interpolants
+export linear_interpolant
+
+# Loss
+export get_loss
+
+# Models
+export StochasticInterpolantModel
+export ConditionalStochasticInterpolant
+
+
+##### Utils #####
+include("plotting_utils.jl")
+export create_gif
+
+
+##### Training #####
 include("training.jl")
 export train_diffusion_model
+export train_stochastic_interpolant
 
 ##### DDPM #####
 include("DDPM/noise_scheduling.jl")
@@ -58,20 +88,9 @@ export ScoreMatchingLangevinDynamics
 
 # Sampling
 export euler_maruyama_sampler
-export sde_sampler
-export ode_sampler
+export smld_sde_sampler
+export smld_ode_sampler
 
-
-##### SI #####
-include("SI/models.jl")
-include("SI/sampling.jl")
-include("SI/loss.jl")
-
-# Loss
-export get_loss
-
-# Models
-export StochasticInterpolant
 
 
 

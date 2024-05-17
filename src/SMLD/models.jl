@@ -152,7 +152,7 @@ function ScoreMatchingLangevinDynamics(
     marginal_probability_std(t) = sqrt.((sigma.^(2 .* t) .- 1) ./ 2 ./ log.(sigma))
     diffusion_coefficient(t) = sigma .^ t
     
-    sde_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.sde_sampler(
+    sde_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.smld_sde_sampler(
         unet,
         ps,
         st,
@@ -165,7 +165,7 @@ function ScoreMatchingLangevinDynamics(
         dev
     )
 
-    ode_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.ode_sampler(
+    ode_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.smld_ode_sampler(
         unet,
         ps,
         st,

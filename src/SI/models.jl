@@ -8,45 +8,55 @@ using LuxCUDA
 using DifferentialEquations
 
 """
-StochasticInterpolant(
+    StochasticInterpolant(
+        unet::UNet,
+        sde_sample::Function,
+        ode_sample::Function,
+        interpolant::Function
+    ) where T <: AbstractFloat
+    
+
+A container layer for the Stochastic Interpolant model
+"""
+struct StochasticInterpolantModel <: Lux.AbstractExplicitContainerLayer{
+    (:drift, :score)
+}
+    drift::UNet
+    score::UNet
+    sde_sample::Function
+    ode_sample::Function
+    interpolant::Function
+    loss::Function
+    gamma::Function
+end
+
+"""
+    StochasticInterpolantModel(
         image_size::Tuple{Int, Int}; 
         in_channels::Int = 3,
         channels=[32, 64, 96, 128], 
         block_depth=2,
-        min_freq=1.0f0, 
-        max_freq=1000.0f0, 
+        min_freq=1.0f0,
+        max_freq=1000.0f0,
         embedding_dims=32,
-        eps=1e-5,
-    ) where T <: AbstractFloat
+        num_steps=100,
+    )
     
-
-Creates a Denoising Diffusion Probabilistic Model (DDPM) with a UNet architecture.
+    Constructs a Stochastic Interpolant model
 """
-struct StochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
-    (:unet, )
-}
-    unet::UNet
-    marginal_probability_std::Function
-    diffusion_coefficient::Function
-    sde_sample::Function
-    ode_sample::Function
-    eps::Float32
-end
-
-function StochasticInterpolant(
+function StochasticInterpolantModel(
     image_size::Tuple{Int, Int}; 
+    sde_enabled::Bool = true,
     in_channels::Int = 3,
     channels=[32, 64, 96, 128], 
     block_depth=2,
-    sigma::AbstractFloat=25.0,
     min_freq=1.0f0,
     max_freq=1000.0f0,
     embedding_dims=32,
-    eps=1e-5,
-    num_steps=1000,
+    num_steps=100,
 )
-
-    unet = UNet(
+    
+    drift = UNet(
         image_size; 
         in_channels=in_channels,
         channels=channels, 
@@ -56,40 +66,63 @@ function StochasticInterpolant(
         embedding_dims=embedding_dims,
     )
 
-    # forward_drift_term(x, ps, t, st) = zeros(size(x))
-    # forward_diffusion_term(x, ps, t, st) = sigma .^ t .* ones(size(x))
+    interpolant = StochasticInterpolants.linear_interpolant
 
-    sigma = Float32(sigma)
-    marginal_probability_std(t) = sqrt.((sigma.^(2 .* t) .- 1) ./ 2 ./ log.(sigma))
-    diffusion_coefficient(t) = sigma .^ t
+    diffusion_coefficient(t) = 2.0f0
+    gamma(t, return_derivative=false) = begin
+        out = sqrt.(2 .* t .* (1 .- t))
+        if return_derivative
+            deriv = (1 .- 2 .* t) ./ sqrt.(- 2 .* t .* (t .- 1))
+            return out, deriv
+        end
+        return out
+    end
 
-    sde_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.sde_sampler(
-        unet,
-        ps,
-        st,
-        rng,
-        marginal_probability_std,
-        diffusion_coefficient,
-        num_samples,
-        num_steps,
-        eps,
-        dev
-    )
+    sde_sample(num_samples, ps, st, rng, dev) = begin
+        println("SDE sampling is not enabled")
+        return nothing
+    end
+
+    if sde_enabled
+
+        score = UNet(
+            image_size; 
+            in_channels=in_channels,
+            channels=channels, 
+            block_depth=block_depth,
+            min_freq=min_freq, 
+            max_freq=max_freq, 
+            embedding_dims=embedding_dims,
+        )
+
+
+        sde_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.sde_sampler(
+            num_samples, drift, score, diffusion_coefficient, gamma, ps, st, rng, num_steps, dev
+        )
+
+        # Loss including the score network
+        loss(x_0, x_1, t, ps, st, rng, dev) = get_loss(
+            x_0, x_1, t, drift, score, interpolant, gamma, ps, st, rng, dev
+        )
+    
+    else 
+
+        # Loss without the score network
+        #loss(x_0, x_1, t, ps, st, rng, dev) = get_loss(
+        #    x_0, x_1, t, drift, interpolant, gamma, ps, st, rng, dev
+        #)
+    end
+
+    
 
     ode_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.ode_sampler(
-        unet,
-        ps,
-        st,
-        rng,
-        marginal_probability_std,
-        diffusion_coefficient,
-        num_samples,
-        num_steps,
-        eps,
-        dev
+        num_samples, drift, ps, st, rng, num_steps, dev
     )
-    
-    return StochasticInterpolant(
-        unet, marginal_probability_std, diffusion_coefficient, sde_sample, ode_sample, eps
+
+    return StochasticInterpolantModel(
+        drift, score, sde_sample, ode_sample, interpolant, loss, gamma
     )
 end
+
+
+

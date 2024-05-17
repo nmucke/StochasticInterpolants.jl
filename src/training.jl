@@ -14,7 +14,22 @@ using ImageFiltering
 using Printf
 using Statistics
 
+"""
+    train_diffusion_model(
+        model,
+        ps::NamedTuple,
+        st::NamedTuple,
+        opt_state::NamedTuple,
+        trainset::AbstractArray,
+        num_epochs::Int,
+        batch_size::Int,
+        num_samples::Int,
+        rng::AbstractRNG,
+        dev=gpu
+    )
 
+Train the Diffusion model.
+"""
 function train_diffusion_model(
     model,
     ps::NamedTuple,
@@ -36,6 +51,8 @@ function train_diffusion_model(
     # end
 
     cpu_dev = LuxCPUDevice();
+
+    loss = 
 
     num_train = size(trainset)[end] 
     for epoch in 1:num_epochs
@@ -81,32 +98,7 @@ function train_diffusion_model(
 
             st_ = Lux.testmode(st)
             x = model.sde_sample(num_samples, ps, st_, rng, dev)
-            
-            #x = model.sample(num_samples, ps, st_, rng, dev)
-            # x = randn(rng, Float32, model.unet.upsample.size..., model.unet.conv_in.in_chs, num_samples)
-            # x = x .* Float32.(model.marginal_probability_std(1.0)) |> dev
-            # t_span = (model.eps, 1.0)
-
-            # dt = 0.001
-
-            # drift = Lux.Experimental.StatefulLuxLayer(model.unet, nothing, st_)
-
-            # dudt(u, p, t) = -model.diffusion_coefficient(t).^2 .* drift((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p) 
-            # g(u, p, t) = model.diffusion_coefficient(t) .* ones(size(u)) |> dev    #diffusion((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
-
-            # ff = SDEFunction{false}(dudt, g)
-            # prob = SDEProblem{false}(ff, g, x, reverse(t_span), ps)
-
-            # sol = solve(
-            #     prob,
-            #     SRIW1(),
-            #     dt = -dt,
-            #     save_everystep = false,
-            #     adaptive = false
-            # )
-            # sol = sol[:, :, :, :, end]
-
-            
+                        
             x = x |> cpu_dev
             x = sqrt.(x[5:123, 5:123, 1, :].^2 + x[5:123, 5:123, 2, :].^2)   
 
@@ -125,3 +117,281 @@ function train_diffusion_model(
     return ps, st
 
 end
+
+"""
+    train_stochastic_interpolant(
+        model::StochasticInterpolantModel,
+        ps::NamedTuple,
+        st::NamedTuple,
+        opt_state::NamedTuple,
+        trainset::AbstractArray,
+        num_epochs::Int,
+        batch_size::Int,
+        num_samples::Int,
+        rng::AbstractRNG,
+        trainset_init_distribution::AbstractArray=nothing,
+        init_and_target_are_correlated=false,
+        train_time_stepping=false,
+        dev=gpu
+    )
+
+Train the Stochastic Interpolant model.
+"""
+function train_stochastic_interpolant(
+    model::StochasticInterpolantModel,
+    ps::NamedTuple,
+    st::NamedTuple,
+    opt_state::NamedTuple,
+    trainset_target_distribution::AbstractArray,
+    num_epochs::Int,
+    batch_size::Int,
+    num_samples::Int,
+    rng::AbstractRNG,
+    dev=gpu
+)
+
+    cpu_dev = LuxCPUDevice();
+
+    num_target = size(trainset_target_distribution)[end]
+    for epoch in 1:num_epochs
+        running_loss = 0.0
+
+        trainset_init_distribution = randn(rng, Float32, size(trainset_target_distribution))
+
+        target_ids = shuffle(rng, 1:num_target)
+        trainset_target_distribution = trainset_target_distribution[:, :, :, target_ids]
+
+        for i in 1:batch_size:size(trainset_target_distribution)[end]
+            
+            if i + batch_size - 1 > size(trainset_target_distribution)[end]
+                break
+            end
+
+            x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev;
+            x_0 = trainset_init_distribution[:, :, :, i:i+batch_size-1] |> dev;
+
+            t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
+
+            (loss, st), pb_f = Zygote.pullback(
+                p -> model.loss(x_0, x_1, t, p, st, rng, dev), ps
+            );
+
+            running_loss += loss
+
+            gs = pb_f((one(loss), nothing))[1];
+            
+            opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+            
+
+            if i % 1 == 0
+                CUDA.reclaim()
+            end
+            
+
+        end
+        
+        running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
+        
+        (epoch % 25 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+
+        if epoch % 50 == 0
+
+            st_ = Lux.testmode(st)
+
+            x = model.sde_sample(num_samples, ps, st_, rng, dev)
+                        
+            x = x |> cpu_dev
+            #x = x[:, :, 1, :]
+            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+            plot_list = []
+            for i in 1:9
+                push!(plot_list, heatmap(x[:, :, i])); 
+            end
+
+            save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
+            savefig(plot(plot_list..., layout=(3,3)), save_dir)
+
+        end
+
+    end
+
+    return ps, st
+
+end
+
+
+
+
+"""
+    train_stochastic_interpolant(
+        model::ConditionalStochasticInterpolant,
+        ps::NamedTuple,
+        st::NamedTuple,
+        opt_state::NamedTuple,
+        trainset::AbstractArray,
+        num_epochs::Int,
+        batch_size::Int,
+        num_samples::Int,
+        rng::AbstractRNG,
+        trainset_init_distribution::AbstractArray=nothing,
+        init_and_target_are_correlated=false,
+        train_time_stepping=false,
+        dev=gpu
+    )
+
+Train the Stochastic Interpolant model.
+"""
+function train_stochastic_interpolant(
+    model::ConditionalStochasticInterpolant,
+    ps::NamedTuple,
+    st::NamedTuple,
+    opt_state::NamedTuple,
+    trainset_target_distribution::AbstractArray,
+    num_epochs::Int,
+    batch_size::Int,
+    num_samples::Int,
+    rng::AbstractRNG,
+    trainset_init_distribution=nothing,
+    init_and_target_are_correlated=false,
+    train_time_stepping=false,
+    dev=gpu
+)
+
+    init_distribution_is_provided = true
+
+    if isnothing(trainset_init_distribution) 
+        init_distribution_is_provided = false
+    end
+
+    if train_time_stepping
+        original_init_condition = trainset_init_distribution[:, :, :, 1]
+    end
+
+    cpu_dev = LuxCPUDevice();
+
+    num_target = size(trainset_target_distribution)[end]
+    if init_distribution_is_provided
+        num_init = size(trainset_init_distribution)[end]
+    end
+    for epoch in 1:num_epochs
+        running_loss = 0.0
+
+        # Shuffle trainset
+        if init_and_target_are_correlated
+            train_ids = shuffle(rng, 1:num_target)
+            trainset_target_distribution = trainset_target_distribution[:, :, :, train_ids]
+            trainset_init_distribution = trainset_init_distribution[:, :, :, train_ids]
+        else
+
+            if isnothing(trainset_init_distribution) 
+                trainset_init_distribution = randn(rng, Float32, size(trainset_target_distribution))
+                num_init = size(trainset_init_distribution)[end]
+            end
+
+            target_ids = shuffle(rng, 1:num_target)
+            trainset_target_distribution = trainset_target_distribution[:, :, :, target_ids]
+
+            init_ids = shuffle(rng, 1:num_init)
+            trainset_init_distribution = trainset_init_distribution[:, :, :, init_ids]
+        end
+    
+        for i in 1:batch_size:size(trainset_target_distribution)[end]
+            
+            if i + batch_size - 1 > size(trainset_target_distribution)[end]
+                break
+            end
+
+            x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev;
+            x_0 = trainset_init_distribution[:, :, :, i:i+batch_size-1] |> dev;
+
+            t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
+
+            (loss, st), pb_f = Zygote.pullback(
+                p -> get_loss(x_0, x_1, t, model, p, st, dev), ps
+            );
+
+            running_loss += loss
+
+            gs = pb_f((one(loss), nothing))[1];
+            
+            opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+            
+
+            if i % 1 == 0
+                CUDA.reclaim()
+            end
+            
+
+        end
+        
+        running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
+        
+        (epoch % 25 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+
+        if epoch % 500 == 0
+
+            st_ = Lux.testmode(st)
+
+            if train_time_stepping
+                init_condition = original_init_condition
+                init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
+                init_condition = init_condition |> dev
+                
+
+                num_steps = 200
+                x = zeros(size(init_condition)[1:3]..., num_steps)
+                x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
+                for i in 2:num_steps
+                    init_condition = model.ode_sample(num_samples, ps, st_, rng, init_condition, dev)
+                    x[:, :, :, i] = init_condition |> cpu_dev
+
+                    if findmax(abs.(x))[1] > 1e2
+                        break
+                    end
+                end
+
+                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+                create_gif(x, "SI.gif")
+
+            else
+
+                if init_distribution_is_provided
+                    x = model.ode_sample(num_samples, ps, st_, rng, dev, x_0=trainset_init_distribution[:, :, :, 1:num_samples])
+                else
+                    x = model.ode_sample(num_samples, ps, st_, rng, dev)
+                end
+                x = model.ode_sample(num_samples, ps, st_, rng, dev)
+                            
+                x = x |> cpu_dev
+                #x = x[:, :, 1, :]
+                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+                plot_list = []
+                for i in 1:9
+                    push!(plot_list, heatmap(x[:, :, i])); 
+                end
+
+                save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
+                savefig(plot(plot_list..., layout=(3,3)), save_dir)
+
+            end
+
+        end
+
+    end
+
+    return ps, st
+
+end
+
+
+
+
+
+
+
+
+
+
