@@ -209,7 +209,23 @@ function train_stochastic_interpolant(
                 push!(plot_list, heatmap(x[:, :, i])); 
             end
 
-            save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
+            save_dir = joinpath("output/train/images/", @sprintf("sde_img_%i.pdf", epoch))
+            savefig(plot(plot_list..., layout=(3,3)), save_dir)
+
+
+
+            x = model.ode_sample(num_samples, ps, st_, rng, dev)
+                        
+            x = x |> cpu_dev
+            #x = x[:, :, 1, :]
+            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+            plot_list = []
+            for i in 1:9
+                push!(plot_list, heatmap(x[:, :, i])); 
+            end
+
+            save_dir = joinpath("output/train/images/", @sprintf("ode_img_%i.pdf", epoch))
             savefig(plot(plot_list..., layout=(3,3)), save_dir)
 
         end
@@ -253,16 +269,9 @@ function train_stochastic_interpolant(
     num_samples::Int,
     rng::AbstractRNG,
     trainset_init_distribution=nothing,
-    init_and_target_are_correlated=false,
     train_time_stepping=false,
     dev=gpu
 )
-
-    init_distribution_is_provided = true
-
-    if isnothing(trainset_init_distribution) 
-        init_distribution_is_provided = false
-    end
 
     if train_time_stepping
         original_init_condition = trainset_init_distribution[:, :, :, 1]
@@ -271,30 +280,15 @@ function train_stochastic_interpolant(
     cpu_dev = LuxCPUDevice();
 
     num_target = size(trainset_target_distribution)[end]
-    if init_distribution_is_provided
-        num_init = size(trainset_init_distribution)[end]
-    end
+    num_init = size(trainset_init_distribution)[end]
+
     for epoch in 1:num_epochs
         running_loss = 0.0
 
         # Shuffle trainset
-        if init_and_target_are_correlated
-            train_ids = shuffle(rng, 1:num_target)
-            trainset_target_distribution = trainset_target_distribution[:, :, :, train_ids]
-            trainset_init_distribution = trainset_init_distribution[:, :, :, train_ids]
-        else
-
-            if isnothing(trainset_init_distribution) 
-                trainset_init_distribution = randn(rng, Float32, size(trainset_target_distribution))
-                num_init = size(trainset_init_distribution)[end]
-            end
-
-            target_ids = shuffle(rng, 1:num_target)
-            trainset_target_distribution = trainset_target_distribution[:, :, :, target_ids]
-
-            init_ids = shuffle(rng, 1:num_init)
-            trainset_init_distribution = trainset_init_distribution[:, :, :, init_ids]
-        end
+        train_ids = shuffle(rng, 1:num_target)
+        trainset_target_distribution = trainset_target_distribution[:, :, :, train_ids]
+        trainset_init_distribution = trainset_init_distribution[:, :, :, train_ids]
     
         for i in 1:batch_size:size(trainset_target_distribution)[end]
             
@@ -308,7 +302,7 @@ function train_stochastic_interpolant(
             t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
 
             (loss, st), pb_f = Zygote.pullback(
-                p -> get_loss(x_0, x_1, t, model, p, st, dev), ps
+                p -> model.loss(x_0, x_1, t, p, st, rng, dev), ps
             );
 
             running_loss += loss
@@ -333,50 +327,46 @@ function train_stochastic_interpolant(
 
             st_ = Lux.testmode(st)
 
-            if train_time_stepping
-                init_condition = original_init_condition
-                init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
-                init_condition = init_condition |> dev
-                
+            init_condition = original_init_condition
+            init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
+            init_condition = init_condition |> dev
+            
+            num_steps = 200
+            x = zeros(size(init_condition)[1:3]..., num_steps)
+            x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
+            for i in 2:num_steps
+                init_condition = model.sde_sample(init_condition, ps, st_, dev)
+                x[:, :, :, i] = init_condition |> cpu_dev
 
-                num_steps = 200
-                x = zeros(size(init_condition)[1:3]..., num_steps)
-                x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
-                for i in 2:num_steps
-                    init_condition = model.ode_sample(num_samples, ps, st_, rng, init_condition, dev)
-                    x[:, :, :, i] = init_condition |> cpu_dev
-
-                    if findmax(abs.(x))[1] > 1e2
-                        break
-                    end
+                if findmax(abs.(x))[1] > 1e2
+                    break
                 end
-
-                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
-
-                create_gif(x, "SI.gif")
-
-            else
-
-                if init_distribution_is_provided
-                    x = model.ode_sample(num_samples, ps, st_, rng, dev, x_0=trainset_init_distribution[:, :, :, 1:num_samples])
-                else
-                    x = model.ode_sample(num_samples, ps, st_, rng, dev)
-                end
-                x = model.ode_sample(num_samples, ps, st_, rng, dev)
-                            
-                x = x |> cpu_dev
-                #x = x[:, :, 1, :]
-                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
-
-                plot_list = []
-                for i in 1:9
-                    push!(plot_list, heatmap(x[:, :, i])); 
-                end
-
-                save_dir = joinpath("output/train/images/", @sprintf("img_%i.pdf", epoch))
-                savefig(plot(plot_list..., layout=(3,3)), save_dir)
-
             end
+
+            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+            create_gif(x, "sde_SI.gif")
+
+
+            init_condition = original_init_condition
+            init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
+            init_condition = init_condition |> dev
+            
+            num_steps = 200
+            x = zeros(size(init_condition)[1:3]..., num_steps)
+            x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
+            for i in 2:num_steps
+                init_condition = model.ode_sample(init_condition, ps, st_, dev)
+                x[:, :, :, i] = init_condition |> cpu_dev
+
+                if findmax(abs.(x))[1] > 1e2
+                    break
+                end
+            end
+
+            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+
+            create_gif(x, "ode_SI.gif")
 
         end
 

@@ -85,7 +85,7 @@ model = StochasticInterpolantModel(
     image_size; 
     sde_enabled=true,
     in_channels=C, 
-    channels=[8, 16, 32, 64, 128], 
+    channels=[8, 16, 32, 64], 
     embedding_dims=embedding_dims, 
     block_depth=2,
 );
@@ -94,24 +94,6 @@ ps, st = Lux.setup(rng, model) .|> dev;
 ##### Optimizer #####
 opt = Optimisers.Adam(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
-
-# x = trainset[:, :, :, random_indices]|> dev ;
-# t = rand(rng, Float32, (1, 1, 1, 9)) |> dev ;
-
-# z = randn(rng, size(x)) |> dev
-# g = model.gamma(t, false) |> dev
-# I, dI_dt = model.interpolant(x, x, t, true) .|> dev
-# I = I .+ g .* z
-
-# score_pred, st_score = model.score((I, t), ps.score, st.score)
-# score_loss = mean(0.5 .* score_pred.^2 - 1 ./ g .* score_pred .* z)
-
-# (loss, st), pb_f = Zygote.pullback(
-#     p -> model.loss(x, x, t, ps, st, rng, dev), ps
-# );
-
-# score_pred, st_score = score((I, t), ps.score, st.score)
-# score_loss = mean(score_pred.^2 - 1 ./ g .* score_pred * z)
 
 ##### Train stochastic interpolant #####
 num_samples = 9;

@@ -19,9 +19,9 @@ using DifferentialEquations
 A container layer for the Stochastic Interpolant model
 """
 struct StochasticInterpolantModel <: Lux.AbstractExplicitContainerLayer{
-    (:drift, :score)
+    (:velocity, :score)
 }
-    drift::UNet
+    velocity::UNet
     score::UNet
     sde_sample::Function
     ode_sample::Function
@@ -56,7 +56,7 @@ function StochasticInterpolantModel(
     num_steps=100,
 )
     
-    drift = UNet(
+    velocity = UNet(
         image_size; 
         in_channels=in_channels,
         channels=channels, 
@@ -68,7 +68,7 @@ function StochasticInterpolantModel(
 
     interpolant = StochasticInterpolants.linear_interpolant
 
-    diffusion_coefficient(t) = 2.0f0
+    diffusion_coefficient(t) = 1.0f0
     gamma(t, return_derivative=false) = begin
         out = sqrt.(2 .* t .* (1 .- t))
         if return_derivative
@@ -97,12 +97,12 @@ function StochasticInterpolantModel(
 
 
         sde_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.sde_sampler(
-            num_samples, drift, score, diffusion_coefficient, gamma, ps, st, rng, num_steps, dev
+            num_samples, velocity, score, diffusion_coefficient, gamma, ps, st, rng, num_steps, dev
         )
 
         # Loss including the score network
         loss(x_0, x_1, t, ps, st, rng, dev) = get_loss(
-            x_0, x_1, t, drift, score, interpolant, gamma, ps, st, rng, dev
+            x_0, x_1, t, velocity, score, interpolant, gamma, ps, st, rng, dev
         )
     
     else 
@@ -116,13 +116,15 @@ function StochasticInterpolantModel(
     
 
     ode_sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.ode_sampler(
-        num_samples, drift, ps, st, rng, num_steps, dev
+        num_samples, velocity, ps, st, rng, num_steps, dev
     )
 
     return StochasticInterpolantModel(
-        drift, score, sde_sample, ode_sample, interpolant, loss, gamma
+        velocity, score, sde_sample, ode_sample, interpolant, loss, gamma
     )
 end
+
+
 
 
 

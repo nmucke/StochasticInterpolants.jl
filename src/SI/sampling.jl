@@ -7,62 +7,104 @@ using StochasticInterpolants
 using LuxCUDA
 
 
-
-"""
-    Euler_Maruyama_sampler(
-        model::ScoreMatchingLangevinDynamics,
-        marginal_probability_std::Function,
-        ps::NamedTuple,
-        st::NamedTuple,
-        rng::AbstractRNG,
-        num_samples::Int,
-        num_steps::Int,
-        eps::Float32,
-        dev=gpu
-    )
-
-    Samples from the SMLD model using the Euler-Maruyama method
-"""
-# function euler_maruyama_sampler(
-#     model::UNet,
+# function sample_sde(
+#     x_0::Int,
+#     velocity::UNet,
+#     score::UNet,
+#     diffusion_coefficient::Function,
+#     gamma::Function,
 #     ps::NamedTuple,
 #     st::NamedTuple,
-#     rng::AbstractRNG,
-#     marginal_probability_std::Function,
-#     diffusion_coefficient::Function,
-#     num_samples::Int,
 #     num_steps::Int,
-#     eps::AbstractFloat,
 #     dev=gpu
 # )
-#     t = ones((1, 1, 1, num_samples)) |> dev
-#     x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
-#     x = x .* Float32.(marginal_probability_std(t))
-#     timesteps = LinRange(1, eps, num_steps)# |> dev
-#     step_size = Float32.(timesteps[1] - timesteps[2]) |> dev
 
-#     for t in timesteps
-#         batch_time_step = ones((1, 1, 1, num_samples)) * t |> dev
+#     eps = 1e-5
 
-#         g = Float32.(diffusion_coefficient(batch_time_step))
+#     # define time span
+#     t_span = (eps, 1.0-eps)
+#     timesteps = LinRange(t_span[1], t_span[2], num_steps)# |> dev
+#     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
-#         score, st = model((x, batch_time_step), ps, st)
+#     # define the drift and diffusion functions
+#     stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(velocity, nothing, st.velocity)
+#     velocitydt(u, p, t) = stateful_velocity_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
 
-#         mean_x = x + (g.^2) .* score .* step_size
+#     stateful_score_NN = Lux.Experimental.StatefulLuxLayer(score, nothing, st.score)
+#     scoredt(u, p, t) = diffusion_coefficient(t)/gamma(t) .* stateful_score_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
 
-#         z = randn(rng, size(x)) |> dev
+#     full_drift(u, p, t) = velocitydt(u, p.velocity, t) - scoredt(u, p.score, t)
 
-#         x = mean_x .+ sqrt.(step_size) .* g .* z  
-#     end
+#     g(u, p, t) = sqrt.(2 .* diffusion_coefficient(t)) .* ones(size(u)) |> dev
+
+#     # define the SDE problem
+#     ff = SDEFunction{false}(full_drift, g)
+#     prob = SDEProblem{false}(ff, g, x_0, t_span, ps)
+
+#     # solve the SDE
+#     x = solve(
+#         prob,
+#         SRIW1(),
+#         dt = dt,
+#         save_everystep = false,
+#         adaptive = false
+#     )
+#     x = x[:, :, :, :, end]
 
 #     return x
 # end
 
+function sde_sampler(
+    x_0::AbstractArray,
+    velocity::UNet,
+    score::UNet,
+    diffusion_coefficient::Function,
+    gamma::Function,
+    ps::NamedTuple,
+    st::NamedTuple,
+    num_steps::Int,
+    dev=gpu
+)
 
+    eps = 1e-5
+
+    # define time span
+    t_span = (eps, 1.0-eps)
+    timesteps = LinRange(t_span[1], t_span[2], num_steps)# |> dev
+    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
+
+    # define the drift and diffusion functions
+    stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(velocity, nothing, st.velocity)
+    velocitydt(u, p, t) = stateful_velocity_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+
+    stateful_score_NN = Lux.Experimental.StatefulLuxLayer(score, nothing, st.score)
+    scoredt(u, p, t) = diffusion_coefficient(t)/gamma(t) .* stateful_score_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+
+    full_drift(u, p, t) = velocitydt(u, p.velocity, t) - scoredt(u, p.score, t)
+
+    g(u, p, t) = sqrt.(2 .* diffusion_coefficient(t)) .* ones(size(u)) |> dev
+
+    # define the SDE problem
+    ff = SDEFunction{false}(full_drift, g)
+    prob = SDEProblem{false}(ff, g, x_0, t_span, ps)
+
+    # solve the SDE
+    x = solve(
+        prob,
+        SRIW1(),
+        dt = dt,
+        save_everystep = false,
+        adaptive = false
+    )
+    x = x[:, :, :, :, end]
+
+    return x
+
+end
 
 function sde_sampler(
     num_samples::Int,
-    drift::UNet,
+    velocity::UNet,
     score::UNet,
     diffusion_coefficient::Function,
     gamma::Function,
@@ -73,80 +115,102 @@ function sde_sampler(
     dev=gpu
 )
 
-    eps = 1e-5
+    # sample initial conditions
+    x = randn(rng, Float32, velocity.upsample.size..., velocity.conv_in.in_chs, num_samples) |> dev
 
-    x = randn(rng, Float32, drift.upsample.size..., drift.conv_in.in_chs, num_samples) |> dev
-
-    t_span = (eps, 1.0-eps)
-
-    timesteps = LinRange(t_span[1], t_span[2], num_steps)# |> dev
-    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
-
-    stateful_drift_NN = Lux.Experimental.StatefulLuxLayer(drift, nothing, st.drift)
-    driftdt(u, p, t) = stateful_drift_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
-
-    stateful_score_NN = Lux.Experimental.StatefulLuxLayer(score, nothing, st.score)
-    scoredt(u, p, t) = diffusion_coefficient(t)/gamma(t) .* stateful_score_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
-
-    full_drift(u, p, t) = driftdt(u, p.drift, t) - scoredt(u, p.score, t)
-
-    g(u, p, t) = sqrt.(2 .* diffusion_coefficient(t)) .* ones(size(u)) |> dev
-
-    ff = SDEFunction{false}(full_drift, g)
-    prob = SDEProblem{false}(ff, g, x, reverse(t_span), ps)
-
-    x = solve(
-        prob,
-        SRIW1(),
-        dt = dt,
-        save_everystep = false,
-        adaptive = false
+    # sample from the SDE
+    x = sde_sampler(
+        x,
+        velocity,
+        score,
+        diffusion_coefficient,
+        gamma,
+        ps,
+        st,
+        num_steps,
+        dev
     )
-    x = x[:, :, :, :, end]
 
     return x
 end
 
-function sde_sampler(
+
+# function sample_ode(
+#     x_0::AbstractArray,
+#     model::UNet,
+#     ps::NamedTuple,
+#     st::NamedTuple,
+#     num_steps::Int,
+#     dev=gpu
+# )
+
+#     t_span = (0.0, 1.0)
+
+#     timesteps = LinRange(0, 1, num_steps)# |> dev
+#     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
+
+#     stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(model, nothing, st.velocity)
+
+#     dudt(u, p, t) = stateful_velocity_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+
+#     # ff = ODEFunction{false}(dudt, g)
+#     prob = ODEProblem(dudt, x_0, t_span, ps.velocity)
+
+#     x = solve(
+#         prob,
+#         Tsit5(),
+#         dt = dt,
+#         save_everystep = false, 
+#         adaptive = true
+#     )
+#     x = x[:, :, :, :, end]
+
+#     return x
+
+# end
+
+
+function ode_sampler(
     x_0::AbstractArray,
-    drift::UNet,
-    score::UNet,
-    diffusion_coefficient::Function,
-    gamma::Function,
+    model::UNet,
     ps::NamedTuple,
     st::NamedTuple,
     num_steps::Int,
     dev=gpu
 )
 
+    # x = sample_ode(
+    #     x_0,
+    #     model,
+    #     ps,
+    #     st,
+    #     num_steps,
+    #     dev
+    # )
+
     t_span = (0.0, 1.0)
 
-    timesteps = LinRange(0.0, 1.0, num_steps)# |> dev
+    timesteps = LinRange(0, 1, num_steps)# |> dev
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
-    stateful_drift_NN = Lux.Experimental.StatefulLuxLayer(drift, nothing, st.drift)
-    driftdt(u, p, t) = stateful_drift_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+    stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(model, nothing, st.velocity)
 
-    stateful_score_NN = Lux.Experimental.StatefulLuxLayer(score, nothing, st.score)
-    scoredt(u, p, t) = diffusion_coefficient(t)/gamma(t) .* stateful_score_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+    dudt(u, p, t) = stateful_velocity_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
 
-    full_drift(u, p, t) = driftdt(u, p.drift, t) - scoredt(u, p.score, t)
-    
-    g(u, p, t) = sqrt.(2 .* diffusion_coefficient(t)) .* ones(size(u)) |> dev
-
-    ff = SDEFunction{false}(full_drift, g)
-    prob = SDEProblem{false}(ff, g, x_0, reverse(t_span), ps)
+    # ff = ODEFunction{false}(dudt, g)
+    prob = ODEProblem(dudt, x_0, t_span, ps.velocity)
 
     x = solve(
         prob,
-        SRIW1(),
+        Tsit5(),
         dt = dt,
-        save_everystep = false,
-        adaptive = false
+        save_everystep = false, 
+        adaptive = true
     )
     x = x[:, :, :, :, end]
 
     return x
+
 end
 
 
@@ -161,63 +225,18 @@ function ode_sampler(
 )
 
     x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
-    t_span = (0.0, 1.0)
 
-    timesteps = LinRange(0, 1, num_steps)# |> dev
-    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
-
-    stateful_drift_NN = Lux.Experimental.StatefulLuxLayer(model, nothing, st.drift)
-
-    dudt(u, p, t) = stateful_drift_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
-    
-    # ff = ODEFunction{false}(dudt, g)
-    prob = ODEProblem(dudt, x, t_span, ps.drift)
-
-    x = solve(
-        prob,
-        Tsit5(),
-        dt = dt,
-        save_everystep = false, 
-        adaptive = true
+    x = ode_sampler(
+        x,
+        model,
+        ps,
+        st,
+        num_steps,
+        dev
     )
-    x = x[:, :, :, :, end]
 
     return x
 
 end
 
-
-function ode_sampler(
-    x_0::AbstractArray,
-    model::UNet,
-    ps::NamedTuple,
-    st::NamedTuple,
-    num_steps::Int,
-    dev=gpu
-)
-
-    t_span = (0.0, 1.0)
-
-    timesteps = LinRange(0, 1, num_steps)# |> dev
-    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
-
-    stateful_drift_NN = Lux.Experimental.StatefulLuxLayer(model, nothing, st)
-
-    dudt(u, p, t) = stateful_drift_NN((u, t .* ones(1, 1, 1, size(u)[end])) |> dev, p) 
-    
-    # ff = ODEFunction{false}(dudt, g)
-    prob = ODEProblem(dudt, x_0, t_span, ps)
-
-    x = solve(
-        prob,
-        Tsit5(),
-        dt = dt,
-        save_everystep = false, 
-        adaptive = true
-    )
-    x = x[:, :, :, :, end]
-
-    return x
-
-end
 

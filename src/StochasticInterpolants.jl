@@ -30,6 +30,8 @@ include("SI/loss.jl")
 # Sampling
 export sde_sampler
 export ode_sampler
+# export sample_sde
+# export sample_ode
 
 # Interpolants
 export linear_interpolant

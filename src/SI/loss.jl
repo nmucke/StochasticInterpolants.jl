@@ -11,7 +11,7 @@ using LuxCUDA
         x_0::AbstractArray, 
         x_1::AbstractArray,
         t::AbstractArray, 
-        drift::UNet,
+        velocity::UNet,
         interpolant::Function, 
         gamma::Function,
         ps::NamedTuple, 
@@ -26,7 +26,7 @@ function get_loss(
     x_0::AbstractArray, 
     x_1::AbstractArray,
     t::AbstractArray, 
-    drift::UNet,
+    velocity::UNet,
     interpolant::Function, 
     gamma::Function,
     ps::NamedTuple, 
@@ -43,11 +43,11 @@ function get_loss(
 
     I = I .+ g .* z
 
-    drift_pred, st_drift = drift((I, t), ps.drift, st.drift)
+    velocity_pred, st_velocity = velocity((I, t), ps.velocity, st.velocity)
 
-    st = (drift=st_drift, score=st.score)
+    st = (velocity=st_velocity, score=st.score)
 
-    loss = mean(drift_pred.^2 - 2.0 .* drift_pred .* (dI_dt .+  dg_dt .* z))
+    loss = mean(velocity_pred.^2 - 2.0 .* velocity_pred .* (dI_dt .+  dg_dt .* z))
 
     return loss, st
 end
@@ -58,7 +58,7 @@ end
         x_0::AbstractArray, 
         x_1::AbstractArray,
         t::AbstractArray, 
-        drift::UNet,
+        velocity::UNet,
         score::UNet,
         interpolant::Function, 
         gamma::Function,
@@ -74,7 +74,7 @@ function get_loss(
     x_0::AbstractArray, 
     x_1::AbstractArray,
     t::AbstractArray, 
-    drift::UNet,
+    velocity::UNet,
     score::UNet,
     interpolant::Function, 
     gamma::Function,
@@ -85,20 +85,20 @@ function get_loss(
 )
     z = randn(rng, size(x_0)) |> dev
 
-    g = gamma(t, false) |> dev
+    g, dg_dt = gamma(t, true) |> dev
 
     I, dI_dt = interpolant(x_0, x_1, t, true) .|> dev
     
     I = I .+ g .* z
 
-    drift_pred, st_drift = drift((I, t), ps.drift, st.drift)
-    drift_loss = mean(0.5*drift_pred.^2 - drift_pred .* dI_dt)
+    velocity_pred, st_velocity = velocity((I, t), ps.velocity, st.velocity)
+    velocity_loss = mean(0.5*velocity_pred.^2 - velocity_pred .* (dI_dt + dg_dt .* z))
 
     score_pred, st_score = score((I, t), ps.score, st.score)
     #score_loss = mean(0.5*score_pred.^2 - 1 ./ g .* score_pred .* z)
     score_loss = mean(0.5*score_pred.^2 .- score_pred .* z)
 
-    st = (drift=st_drift, score=st_score)
+    st = (velocity=st_velocity, score=st_score)
 
-    return drift_loss + score_loss, st
+    return velocity_loss + score_loss, st
 end

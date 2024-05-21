@@ -91,11 +91,11 @@ out_channels = C;
 
 #trainset = reshape(trainset, H, W, C, num_train);
 
-##### DDPM model #####
-model = StochasticInterpolantModel(
+##### conditional SI model #####
+model = ConditionalStochasticInterpolant(
     image_size; 
     in_channels=C, 
-    channels=[8, 16, 32, 64, 128], 
+    channels=[8, 16, 32, 64], 
     embedding_dims=embedding_dims, 
     block_depth=2,
     num_steps=400,
@@ -120,36 +120,6 @@ ps,st = train_stochastic_interpolant(
     rng,
     trainset_init_distribution,
     true,
-    true,
     gpu
 )
 
-
-
-# using DifferentialEquations
-    
-# #x = model.sample(num_samples, ps, st_, rng, dev)
-# x = randn(rng, Float32, model.unet.upsample.size..., model.unet.conv_in.in_chs, num_samples) |> dev
-# t_span = (0.0, 1.0)
-# # t_span = Float32.(t_span)
-
-# timesteps = LinRange(0, 1, 100)# |> dev
-# dt = Float32.(timesteps[2] - timesteps[1]) |> dev
-
-
-# stateful_drift_NN = Lux.Experimental.StatefulLuxLayer(model.unet, nothing, st);
-
-# dudt(u, p, t) = stateful_drift_NN((u, t .* ones(Float32, 1, 1, 1, size(u)[end])) |> dev, p);
-
-
-# #ff = ODEFunction{false}(dudt)
-# prob = ODEProblem(dudt, x, t_span, ps)
-
-# x = solve(
-#     prob,
-#     RK4(),
-#     dt = dt,
-#     save_everystep = false, 
-#     adaptive = false
-# )
-# x = x[:, :, :, :, end]

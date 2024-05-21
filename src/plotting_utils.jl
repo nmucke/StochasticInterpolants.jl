@@ -17,4 +17,3 @@ function create_gif(data, filename)
     anim = heatgif(data)
     gif(anim, filename, fps = 15)
 end
-
