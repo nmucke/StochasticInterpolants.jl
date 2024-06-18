@@ -1,19 +1,90 @@
 using Plots
 
-function heatgif(A)
-    p = heatmap(A[:,:,1])
-    anim = @animate for i=1:size(A,3)
-        heatmap!(p[1], A[:,:, i])
+function create_gif(A, filename, plot_titles)
+    
+    p_list = [];
+    for i = 1:length(A)
+        p = heatmap(
+            A[i][:,:,1], legend=false, xticks=false, yticks=false, 
+            clim=(minimum(A[i]), maximum(A[i])), aspect_ratio=:equal, 
+            colorbar=true, title=plot_titles[i]
+        )
+        push!(p_list, p) 
     end
-    return anim
+    p = plot(p_list..., layout=(2, length(A) ÷ 2), size=(1600, 800))
+
+    anim = @animate for i=1:size(A[1], 3)
+        for j = 1:length(A)
+            p[j][1][:z] = A[j][:,:,i]
+        end
+    end
+    gif(anim, filename, fps = 5)
+    
 end
 
-"""
-    create_gif(data, filename)
+# function heatgif(A, B)
+#     p1 = heatmap(
+#         A[:,:,1], legend=false, xticks=false, yticks=false, 
+#         clim=(minimum(A), maximum(A)), aspect_ratio=:equal, 
+#         colorbar=true
+#     )
+#     p2 = heatmap(
+#         B[:,:,1], legend=false, xticks=false, yticks=false, 
+#         clim=(minimum(B), maximum(B)), aspect_ratio=:equal, 
+#         colorbar=true
+#     )
+#     p = plot(p1, p2, layout=(1,2))
 
-Create a gif from a 3D array of images
-"""
-function create_gif(data, filename)
-    anim = heatgif(data)
-    gif(anim, filename, fps = 15)
-end
+#     anim = @animate for i=1:size(A, 3)
+#         p[1][1][:z] = A[:,:,i]
+#         p[2][1][:z] = B[:,:,i]
+#     end
+
+#     gif(anim, filename, fps = 5)
+# end
+# function heatgif(A, B, C)
+#     p1 = heatmap(
+#         A[:,:,1], legend=false, xticks=false, yticks=false, 
+#         clim=(minimum(A), maximum(A)), aspect_ratio=:equal, 
+#         colorbar=true
+#     )
+#     p2 = heatmap(
+#         B[:,:,1], legend=false, xticks=false, yticks=false, 
+#         clim=(minimum(A), maximum(A)), aspect_ratio=:equal, 
+#         colorbar=true
+#     )
+#     p3 = heatmap(
+#         C[:,:,1], legend=false, xticks=false, yticks=false, 
+#         clim=(minimum(C), maximum(C)), aspect_ratio=:equal, 
+#         colorbar=true
+#     )
+#     p = plot(p1, p2, p3, layout=(1,3))
+
+#     anim = @animate for i=1:size(A, 3)
+#         p[1][1][:z] = A[:,:,i]
+#         p[2][1][:z] = B[:,:,i]
+#         p[3][1][:z] = C[:,:,i]
+#     end
+
+#     gif(anim, filename, fps = 5)
+# end
+
+# """
+#     create_gif(data, filename)
+
+# Create a gif from a 3D array of images
+# """
+# function create_gif(data, filename)
+#     anim = heatgif(data)
+#     gif(anim, filename, fps = 5)
+# end
+
+# function create_gif(data, data2, filename)
+#     anim = heatgif(data, data2)
+#     gif(anim, filename, fps = 5)
+# end
+
+# function create_gif(data, data2, data3, filename)
+#     anim = heatgif(data, data2, data3)
+#     gif(anim, filename, fps = 5)
+# end

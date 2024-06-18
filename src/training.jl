@@ -13,6 +13,7 @@ using Images
 using ImageFiltering
 using Printf
 using Statistics
+using ProgressBars
 
 """
     train_diffusion_model(
@@ -52,7 +53,6 @@ function train_diffusion_model(
 
     cpu_dev = LuxCPUDevice();
 
-    loss = 
 
     num_train = size(trainset)[end] 
     for epoch in 1:num_epochs
@@ -259,7 +259,7 @@ end
 Train the Stochastic Interpolant model.
 """
 function train_stochastic_interpolant(
-    model::ConditionalStochasticInterpolant,
+    model::ForecastingStochasticInterpolant,
     ps::NamedTuple,
     st::NamedTuple,
     opt_state::NamedTuple,
@@ -273,14 +273,21 @@ function train_stochastic_interpolant(
     dev=gpu
 )
 
+    min_lr = 1e-5
+    max_lr = 1e-3 
+
+    num_steps = num_samples
+
+    output_sde = true
+    output_ode = false
+
     if train_time_stepping
-        original_init_condition = trainset_init_distribution[:, :, :, 1]
+        original_init_condition = trainset_init_distribution[:, :, :, 1:num_steps]
     end
 
     cpu_dev = LuxCPUDevice();
 
     num_target = size(trainset_target_distribution)[end]
-    num_init = size(trainset_init_distribution)[end]
 
     for epoch in 1:num_epochs
         running_loss = 0.0
@@ -299,10 +306,8 @@ function train_stochastic_interpolant(
             x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev;
             x_0 = trainset_init_distribution[:, :, :, i:i+batch_size-1] |> dev;
 
-            t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
-
             (loss, st), pb_f = Zygote.pullback(
-                p -> model.loss(x_0, x_1, t, p, st, rng, dev), ps
+                p -> model.loss(x_0, x_1, p, st, rng, dev), ps
             );
 
             running_loss += loss
@@ -310,63 +315,107 @@ function train_stochastic_interpolant(
             gs = pb_f((one(loss), nothing))[1];
             
             opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+
             
 
             if i % 1 == 0
                 CUDA.reclaim()
             end
             
-
         end
+
+        # Cosine annealing learning rate
+        # opt_state = (; opt_state..., Adam(0.5 * (max_lr + min_lr) * (1 + cos(pi * epoch / num_epochs)), (0.9, 0.999), 1e-10))
+        # new_lr = min_lr + 0.5 * (max_lr - min_lr) * (1 + cos(pi * epoch / num_epochs))
+        # opt_state.rule = Adam(new_lr, (0.9, 0.999), 1e-8)
         
         running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
         
-        (epoch % 25 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+        (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
-        if epoch % 500 == 0
+        if epoch % 50 == 0
 
             st_ = Lux.testmode(st)
 
-            init_condition = original_init_condition
-            init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
-            init_condition = init_condition |> dev
-            
-            num_steps = 200
-            x = zeros(size(init_condition)[1:3]..., num_steps)
-            x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
-            for i in 2:num_steps
-                init_condition = model.sde_sample(init_condition, ps, st_, dev)
-                x[:, :, :, i] = init_condition |> cpu_dev
+            num_paths = 4
 
-                if findmax(abs.(x))[1] > 1e2
-                    break
+            if output_sde
+                x = zeros(size(original_init_condition)..., num_paths)
+                init_condition = reshape(original_init_condition, size(original_init_condition)..., 1)
+                init_condition = repeat(init_condition, 1, 1, 1, 1, num_paths) |> dev
+                x[:, :, :, 1, :] = init_condition[:, :, :, 1, :]
+
+                error = []
+                for i in ProgressBar(1:(num_steps - 1))
+                    # init_condition = model.ode_sample(init_condition, ps, st_, dev)
+                    # x[:, :, :, i] = init_condition |> cpu_dev
+                    
+                    # if i % 25 == 0
+                    #     init_condition = original_init_condition[:, :, :, i:i] |> dev
+                    # else
+                    #     init_condition = x[:, :, :, i:i] |> dev
+                    #     init_condition = repeat(init_condition, 1, 1, 1, num_paths)
+                    # end
+                    pred = forecasting_sde_sampler(x[:, :, :, i, :] |> dev, model, ps, st_, 1000, rng, dev)
+                    x[:, :, :, i+1, :] = pred |> cpu_dev
+                    x_mean = mean(x[:, :, :, i+1, :], dims=4)
+
+                    push!(error, mean((x_mean - original_init_condition[:, :, :, i+1] ).^2))
+
+                    if findmax(abs.(x))[1] > 1e2
+                        break
+                    end
                 end
+
+
+                println("Time stepping error (SDE): ", mean(error))
+                x = sqrt.(x[:, :, 1, :, :].^2 + x[:, :, 2, :, :].^2)
+                x_true = sqrt.(original_init_condition[:, :, 1, :].^2 + original_init_condition[:, :, 2, :].^2)
+
+                x_mean = mean(x, dims=4)
+                x_std = std(x, dims=4)
+
+                save_path = @sprintf("output/sde_SI_%i.gif", epoch)
+
+                preds_to_save = (x_mean, x_true, x_mean-x_true, x_std, x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
+                create_gif(preds_to_save, save_path, ["Pred mean", "True", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
             end
 
-            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+            if output_ode
+                x = zeros(size(original_init_condition)...)
+                x[:, :, :, 1] = original_init_condition[:, :, :, 1] |> cpu_dev
 
-            create_gif(x, "sde_SI.gif")
+                error = []
+                for i in 1:(num_steps - 1)
+                    # init_condition = model.ode_sample(init_condition, ps, st_, dev)
+                    # x[:, :, :, i] = init_condition |> cpu_dev
 
+                    if i % 25 == 0
+                        init_condition = original_init_condition[:, :, :, i:i] |> dev
+                    else
+                        init_condition = x[:, :, :, i:i] |> dev
+                    end
+                    pred = forecasting_ode_sampler(init_condition, model, ps, st_, 500, dev)
 
-            init_condition = original_init_condition
-            init_condition = reshape(init_condition, size(init_condition)[1], size(init_condition)[2], 2, 1)
-            init_condition = init_condition |> dev
-            
-            num_steps = 200
-            x = zeros(size(init_condition)[1:3]..., num_steps)
-            x[:, :, :, 1] = init_condition[:, :, :, 1] |> cpu_dev
-            for i in 2:num_steps
-                init_condition = model.ode_sample(init_condition, ps, st_, dev)
-                x[:, :, :, i] = init_condition |> cpu_dev
+                    x[:, :, :, i+1] = pred |> cpu_dev
+                    
+                    push!(error, mean((x[:, :, :, i+1] - original_init_condition[:, :, :, i+1] ).^2))
 
-                if findmax(abs.(x))[1] > 1e2
-                    break
+                    if findmax(abs.(x))[1] > 1e2
+                        break
+                    end
                 end
+
+
+                println("Time stepping error (ODE): ", mean(error))
+
+                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+                x_true = sqrt.(original_init_condition[:, :, 1, :].^2 + original_init_condition[:, :, 2, :].^2)
+
+                save_path = @sprintf("output/ode_SI_%i.gif", epoch)
+                create_gif(x, x_true, x-x_true, save_path)
             end
-
-            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
-
-            create_gif(x, "ode_SI.gif")
+            
 
         end
 

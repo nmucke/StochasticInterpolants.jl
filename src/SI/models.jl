@@ -78,10 +78,10 @@ function StochasticInterpolantModel(
         return out
     end
 
-    sde_sample(num_samples, ps, st, rng, dev) = begin
-        println("SDE sampling is not enabled")
-        return nothing
-    end
+    # sde_sample(num_samples, ps, st, rng, dev) = begin
+    #     println("SDE sampling is not enabled")
+    #     return nothing
+    # end
 
     if sde_enabled
 

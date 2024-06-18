@@ -4,6 +4,7 @@ authors = ["nmucke"]
 version = "1.0.0-DEV"
 
 [deps]
+ArrayPadding = "fe5ef43c-4912-423d-9170-4bd5cb6a013a"
 Augmentor = "02898b10-1f73-11ea-317c-6393d7073e15"
 BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"

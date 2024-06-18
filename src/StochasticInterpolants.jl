@@ -17,6 +17,7 @@ using LuxCUDA
 include("neural_network_layers.jl")
 export residual_block
 export UNet
+export ConditionalUNet
 export UpBlock, DownBlock
 export sinusoidal_embedding
 
@@ -24,12 +25,20 @@ export sinusoidal_embedding
 include("SI/interpolants.jl")
 include("SI/models.jl")
 include("SI/conditional_models.jl")
+include("SI/forecasting_models.jl")
 include("SI/sampling.jl")
 include("SI/loss.jl")
+
+# Models
+export StochasticInterpolantModel
+export ConditionalStochasticInterpolant
+export ForecastingStochasticInterpolant
 
 # Sampling
 export sde_sampler
 export ode_sampler
+export forecasting_sde_sampler
+export forecasting_ode_sampler
 # export sample_sde
 # export sample_ode
 
@@ -38,10 +47,8 @@ export linear_interpolant
 
 # Loss
 export get_loss
+export get_forecasting_loss
 
-# Models
-export StochasticInterpolantModel
-export ConditionalStochasticInterpolant
 
 
 ##### Utils #####

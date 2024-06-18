@@ -3,6 +3,7 @@ using Random
 using CUDA
 using NNlib
 using Setfield
+using ArrayPadding
 
 ###############################################################################
 # sinusoidal_embedding
@@ -89,9 +90,11 @@ function residual_block(
         SkipConnection(
             Chain(
                 BatchNorm(out_channels),
-                Conv(kernel_size, out_channels => out_channels; stride=1, pad=(1, 1)), 
+                a -> pad(a, :periodic, (1, 1)),
+                Conv(kernel_size, out_channels => out_channels; stride=1),#, pad=(1, 1)), 
                 swish,
-                Conv(kernel_size, out_channels => out_channels; stride=1, pad=(1, 1))
+                a -> pad(a, :periodic, (1, 1)),
+                Conv(kernel_size, out_channels => out_channels; stride=1)#, pad=(1, 1))
             ), +
         )
     )
@@ -129,7 +132,7 @@ function DownBlock(
     layers = []
 
     push!(layers, residual_block(in_channels, out_channels))
-    for _ in 2:block_depth
+    for _ in 1:block_depth
         push!(layers, residual_block(out_channels, out_channels))
     end
 
@@ -195,7 +198,7 @@ function UpBlock(
 
     layers = []
     push!(layers, residual_block(in_channels + out_channels, out_channels))
-    for _ in 2:block_depth
+    for _ in 1:block_depth
         push!(layers, residual_block(out_channels * 2, out_channels))
     end
     residual_blocks = Chain(layers...; disable_optimizations=true)
@@ -297,6 +300,7 @@ function UNet(
     return UNet(upsample, conv_in, conv_out, down_blocks, residual_blocks, up_blocks, noise_embedding)
 end
 
+
 function (unet::UNet)(
     x::Tuple{AbstractArray{T, 4}, AbstractArray{S, 4}}, 
     ps::NamedTuple,
@@ -344,6 +348,118 @@ function (unet::UNet)(
     end
 
     x, new_st = unet.conv_out(x, ps.conv_out, st.conv_out)
+    @set! st.conv_out = new_st
+
+    return x, st
+end
+struct ConditionalUNet <: Lux.AbstractExplicitContainerLayer{
+    (:upsample, :conv_in, :init_conv_in, :conv_out, :down_blocks, :residual_blocks, :up_blocks)
+}
+    upsample::Upsample
+    conv_in::Conv
+    init_conv_in::Conv
+    conv_out::Conv
+    down_blocks::Lux.AbstractExplicitLayer
+    residual_blocks::Lux.AbstractExplicitLayer
+    up_blocks::Lux.AbstractExplicitLayer
+    noise_embedding::Function
+end
+
+function ConditionalUNet(
+    image_size::Tuple{Int, Int}; 
+    in_channels::Int = 3,
+    channels=[32, 64, 96, 128], 
+    block_depth=2,
+    min_freq=1.0f0, 
+    max_freq=1000.0f0, 
+    embedding_dims=32
+)
+    upsample = Upsample(:nearest; size=image_size)
+    conv_in = Conv((1, 1), in_channels => embedding_dims)
+    init_conv_in = Conv((1, 1), in_channels => embedding_dims)
+    conv_out = Conv((1, 1), channels[1] => in_channels; init_weight=Lux.zeros32)
+
+    noise_embedding = x -> sinusoidal_embedding(x, min_freq, max_freq, embedding_dims)
+
+    channel_input = embedding_dims + embedding_dims + embedding_dims #channels[1] + channels[1]
+
+    down_blocks = []
+    push!(down_blocks, DownBlock(channel_input, channels[1], block_depth))
+    for i in 1:(length(channels) - 2)
+        push!(down_blocks, DownBlock(channels[i], channels[i + 1], block_depth))
+    end
+    down_blocks = Chain(down_blocks...; disable_optimizations=true)
+
+    
+    residual_blocks = []
+    push!(residual_blocks, residual_block(channels[end - 1], channels[end]))
+    for _ in 2:block_depth
+        push!(residual_blocks, residual_block(channels[end], channels[end]))
+    end
+    residual_blocks = Chain(residual_blocks...; disable_optimizations=true)
+
+    reverse!(channels)
+    up_blocks = [UpBlock(channels[i], channels[i + 1], block_depth)
+                 for i in 1:(length(channels) - 1)]
+    up_blocks = Chain(up_blocks...)
+
+    return ConditionalUNet(upsample, conv_in, init_conv_in, conv_out, down_blocks, residual_blocks, up_blocks, noise_embedding)
+end
+
+
+function (conditional_unet::ConditionalUNet)(
+    x::Tuple{AbstractArray{T, 4}, AbstractArray{T, 4}, AbstractArray{S, 4}}, 
+    ps::NamedTuple,
+    st::NamedTuple
+) where {T <: AbstractFloat, S <: Any}
+
+    noisy_images, init_noisy_images, noise_variances = x
+    @assert size(noise_variances)[1:3] == (1, 1, 1)
+    @assert size(noisy_images, 4) == size(noise_variances, 4)
+    @assert size(init_noisy_images, 4) == size(noise_variances, 4)
+
+    emb = conditional_unet.noise_embedding(noise_variances)
+    @assert size(emb)[[1, 2, 4]] == (1, 1, size(noise_variances, 4))
+    emb, _ = conditional_unet.upsample(emb, ps.upsample, st.upsample)
+    @assert size(emb)[[1, 2, 4]] ==
+            (size(noisy_images, 1), size(noisy_images, 2), size(noise_variances, 4))
+
+    x, new_st = conditional_unet.conv_in(noisy_images, ps.conv_in, st.conv_in)
+    @set! st.conv_in = new_st
+    @assert size(x)[[1, 2, 4]] ==
+            (size(noisy_images, 1), size(noisy_images, 2), size(noisy_images, 4))
+
+    init_x, new_st = conditional_unet.init_conv_in(init_noisy_images, ps.init_conv_in, st.init_conv_in)
+    @set! st.init_conv_in = new_st
+    @assert size(init_x)[[1, 2, 4]] ==
+            (size(init_noisy_images, 1), size(init_noisy_images, 2), size(init_noisy_images, 4))
+
+    x = cat(x, init_x, emb; dims=3)
+    @assert size(x)[[1, 2, 4]] ==
+            (size(noisy_images, 1), size(noisy_images, 2), size(noisy_images, 4))
+
+    skips_at_each_stage = ()
+    for i in 1:length(conditional_unet.down_blocks)
+        layer_name = Symbol(:layer_, i)
+        (x, skips), new_st = conditional_unet.down_blocks[i](x, ps.down_blocks[layer_name],
+                                                 st.down_blocks[layer_name])
+        #x = leakyrelu.(x)                                              
+        @set! st.down_blocks[layer_name] = new_st
+        skips_at_each_stage = (skips_at_each_stage..., skips)
+    end
+
+    x, new_st = conditional_unet.residual_blocks(x, ps.residual_blocks, st.residual_blocks)
+    @set! st.residual_blocks = new_st
+
+    for i in 1:length(conditional_unet.up_blocks)
+        layer_name = Symbol(:layer_, i)
+        x, new_st = conditional_unet.up_blocks[i]((x, skips_at_each_stage[end - i + 1]),
+                                      ps.up_blocks[layer_name], st.up_blocks[layer_name])
+        #x = leakyrelu.(x)
+        @set! st.up_blocks[layer_name] = new_st
+    end
+
+    x, new_st = conditional_unet.conv_out(x, ps.conv_out, st.conv_out)
     @set! st.conv_out = new_st
 
     return x, st
