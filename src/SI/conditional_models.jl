@@ -6,7 +6,7 @@ ConditionalStochasticInterpolant(
         sde_sample::Function,
         ode_sample::Function,
         interpolant::Function
-    ) where T <: AbstractFloat
+    )
     
 
 A container layer for the Stochastic Interpolant model

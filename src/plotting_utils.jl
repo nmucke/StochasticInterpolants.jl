@@ -6,19 +6,29 @@ function create_gif(A, filename, plot_titles)
     for i = 1:length(A)
         p = heatmap(
             A[i][:,:,1], legend=false, xticks=false, yticks=false, 
-            clim=(minimum(A[i]), maximum(A[i])), aspect_ratio=:equal, 
+            clim=(minimum(A[1]), maximum(A[1])), aspect_ratio=:equal, 
             colorbar=true, title=plot_titles[i]
         )
         push!(p_list, p) 
     end
-    p = plot(p_list..., layout=(2, length(A) ÷ 2), size=(1600, 800))
+
+    if length(A) > 2
+        p = plot(p_list..., layout=(2, length(A) ÷ 2), size=(1600, 800))
+
+    elseif length(A) == 1
+        p = plot(p_list..., layout=(1, 1), size=(800, 400))
+    else
+        p = plot(p_list..., layout=(1, length(A)), size=(800, 400))
+    end
 
     anim = @animate for i=1:size(A[1], 3)
         for j = 1:length(A)
-            p[j][1][:z] = A[j][:,:,i]
+            p[j][1][:z] = transpose(A[j][:,:,i])
+            
+            # p[j][1][:title] = plot_titles[j] + " - time step: " + string(i)
         end
     end
-    gif(anim, filename, fps = 5)
+    gif(anim, filename, fps = 15)
     
 end
 

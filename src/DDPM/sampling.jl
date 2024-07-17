@@ -17,7 +17,7 @@ using LuxCUDA
         ps::NamedTuple,
         st::NamedTuple,
         rng::AbstractRNG,
-        dev=gpu
+        dev=gpu_device()
     )
 
 Calls the model to predict the noise in the image and returns 
@@ -32,7 +32,7 @@ function sample_timestep(
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
-    dev=gpu
+    dev=gpu_device()
 )
 
     t_idx = t .+ 1

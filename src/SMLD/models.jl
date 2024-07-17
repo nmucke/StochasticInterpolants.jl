@@ -106,7 +106,7 @@ ScoreMatchingLangevinDynamics(
         max_freq=1000.0f0, 
         embedding_dims=32,
         eps=1e-5,
-    ) where T <: AbstractFloat
+    )
     
 
 Creates a Denoising Diffusion Probabilistic Model (DDPM) with a UNet architecture.

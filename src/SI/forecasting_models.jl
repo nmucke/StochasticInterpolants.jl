@@ -1,11 +1,11 @@
 
 """
-ForecastingStochasticInterpolant(
+    ForecastingStochasticInterpolant(
         unet::UNet,
         sde_sample::Function,
         ode_sample::Function,
         interpolant::Function
-    ) where T <: AbstractFloat
+    )
     
 
 A container layer for the Stochastic Interpolant model
@@ -13,12 +13,14 @@ A container layer for the Stochastic Interpolant model
 struct ForecastingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
     (:velocity, )
 }
-    velocity::ConditionalUNet
+    velocity::Lux.AbstractExplicitLayer
     score::Function
     interpolant::Function
     loss::Function
     gamma::Function
     diffusion_coefficient::Function
+    drift_term::Function
+    diffusion_term::Function
 end
 
 """
@@ -44,21 +46,21 @@ function ForecastingStochasticInterpolant(
     max_freq=1000.0f0,
     embedding_dims=32,
     num_steps=100,
-    dev=gpu
+    dev=gpu_device()
 )
 
-    diff_multiplier = 0.1f0 |> dev
+    diff_multiplier = 0.5f0 |> dev
 
     gamma(t) = diff_multiplier .* (1 .- t) |> dev
     dgamma_dt(t) = -diff_multiplier .* ones(size(t))  |> dev
 
-    diffusion_coefficient(t) = diff_multiplier .* sqrt.((3 .- t) .* (1 .- t))  |> dev
+    diffusion_coefficient(t) = diff_multiplier .* sqrt.((3 .- t) .* (1 .- t)) |> dev
 
-    alpha(t) = 1 .- t  |> dev
-    dalpha_dt(t) = -1  |> dev
+    alpha(t) = 1 .- t |> dev
+    dalpha_dt(t) = -1 |> dev
 
-    beta(t) = t.^2  |> dev
-    dbeta_dt(t) = 2 .* t  |> dev
+    beta(t) = t.^2 |> dev
+    dbeta_dt(t) = 2 .* t |> dev
 
     interpolant(x_0, x_1, t) = begin
 
@@ -68,7 +70,27 @@ function ForecastingStochasticInterpolant(
         return I, dI_dt
     end
 
-    velocity = ConditionalUNet(
+
+    # velocity = ConditionalUNet(
+    #     image_size; 
+    #     in_channels=in_channels,
+    #     channels=channels, 
+    #     block_depth=block_depth,
+    #     min_freq=min_freq, 
+    #     max_freq=max_freq, 
+    #     embedding_dims=embedding_dims,
+    # )
+
+    # velocity =  ConvNextUNet(
+    #     image_size; 
+    #     in_channels=in_channels,
+    #     channels=channels, 
+    #     block_depth=block_depth,
+    #     min_freq=min_freq, 
+    #     max_freq=max_freq, 
+    #     embedding_dims=embedding_dims
+    # )
+    velocity =  ParsConvNextUNet(
         image_size; 
         in_channels=in_channels,
         channels=channels, 
@@ -76,7 +98,39 @@ function ForecastingStochasticInterpolant(
         min_freq=min_freq, 
         max_freq=max_freq, 
         embedding_dims=embedding_dims,
+        pars_dim=1
     )
+
+
+    # velocity = ConditionalDiffusionTransformer(
+    #     image_size;
+    #     in_channels=in_channels, 
+    #     patch_size=(8, 8),
+    #     embed_dim=256, 
+    #     depth=4, 
+    #     number_heads=8,
+    #     mlp_ratio=4.0f0, 
+    #     dropout_rate=0.1f0, 
+    #     embedding_dropout_rate=0.1f0,
+    # )
+
+    diffusion_term(t, x, x_0, pars, ps, st) = begin
+        return diffusion_coefficient(t)
+    end
+
+    drift_term(t, x, x_0, pars, ps, st) = begin
+
+        vel_t, st = velocity((x, x_0, pars, t), ps, st)
+
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
+
+        score = A .* (beta(t) .* vel_t .- c)
+
+        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
+    end
 
     score(input, vel_t) = begin
 
@@ -94,11 +148,11 @@ function ForecastingStochasticInterpolant(
     end
 
     # Loss including the score network
-    loss(x_0, x_1, ps, st, rng, dev) = get_forecasting_loss(
-        x_0, x_1, velocity, interpolant, gamma, dgamma_dt, ps, st, rng, dev
+    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
+        x_0, x_1, pars, velocity, interpolant, gamma, dgamma_dt, ps, st, rng, dev
     )
 
     return ForecastingStochasticInterpolant(
-        velocity, score, interpolant, loss, gamma, diffusion_coefficient
+        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
     )
 end

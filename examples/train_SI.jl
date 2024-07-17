@@ -28,7 +28,7 @@ cpu_dev = LuxCPUDevice();
 num_train = 1000;
 kernel_size = (5, 5);
 embedding_dims = 8;
-batch_size = 32;
+batch_size = 16;
 learning_rate = 1e-4;
 weight_decay = 1e-8;
 timesteps = 100;
@@ -46,7 +46,7 @@ num_samples = 9;
 
 
 num_train = 200*5;
-data_train = load("data/turbulence.jld2", "data_train");
+data_train = load("data/data_train_small.jld2", "data_train");
 #data_train[1].data[1].u[200][2]
 H, W = size(data_train[1].data[1].u[1][1]).-2;
 trainset = zeros(H, W, 2, 200*5);
@@ -85,12 +85,12 @@ model = StochasticInterpolantModel(
     image_size; 
     sde_enabled=true,
     in_channels=C, 
-    channels=[8, 16, 32, 64], 
+    channels=[16, 32, 64], 
     embedding_dims=embedding_dims, 
     block_depth=2,
 );
 ps, st = Lux.setup(rng, model) .|> dev;
-
+learning_rate = 1e-4;
 ##### Optimizer #####
 opt = Optimisers.Adam(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
@@ -112,6 +112,36 @@ ps,st = train_stochastic_interpolant(
 
 
 
-st_ = Lux.testmode(st)
+# st_ = Lux.testmode(st)
 
-x = model.sde_sample(num_samples, ps, st_, rng, dev)
+# x = model.sde_sample(num_samples, ps, st_, rng, dev)
+
+# x = trainset[:, :, :, 1:4] |> dev;
+# t = randn(rng, (1, 1, 1, 4)) |> dev;
+
+# dit = DiffusionTransformer(
+#     (H, W);
+#     in_channels=C, 
+#     patch_size=(4, 4),
+#     embed_dim=1024, 
+#     depth=2, 
+#     number_heads=2,
+#     mlp_ratio=4.0f0, 
+#     dropout_rate=0.1f0, 
+#     embedding_dropout_rate=0.1f0,
+# )
+# ps, st = Lux.setup(rng, dit) .|> dev;
+
+# out = dit((x, t), ps, st)
+
+
+
+xx = (randn(rng, (32, 32, 2, 1)), randn(rng, (32, 32, 2, 1)), randn(rng, (32, 32, 2, 1)))
+a = 3
+
+function lol(x, a)
+
+    return x .+ a
+end
+
+lal = lol.(xx, a)

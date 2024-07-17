@@ -26,7 +26,7 @@ using ProgressBars
         batch_size::Int,
         num_samples::Int,
         rng::AbstractRNG,
-        dev=gpu
+        dev=gpu_device()
     )
 
 Train the Diffusion model.
@@ -41,7 +41,7 @@ function train_diffusion_model(
     batch_size::Int,
     num_samples::Int,
     rng::AbstractRNG,
-    dev=gpu
+    dev=gpu_device()
 )
 
     # if typeof(model) == ScoreMatchingLangevinDynamics
@@ -132,7 +132,7 @@ end
         trainset_init_distribution::AbstractArray=nothing,
         init_and_target_are_correlated=false,
         train_time_stepping=false,
-        dev=gpu
+        dev=gpu_device()
     )
 
 Train the Stochastic Interpolant model.
@@ -147,7 +147,7 @@ function train_stochastic_interpolant(
     batch_size::Int,
     num_samples::Int,
     rng::AbstractRNG,
-    dev=gpu
+    dev=gpu_device()
 )
 
     cpu_dev = LuxCPUDevice();
@@ -192,7 +192,7 @@ function train_stochastic_interpolant(
         
         running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
         
-        (epoch % 25 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+        (epoch % 10 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
         if epoch % 50 == 0
 
@@ -214,19 +214,19 @@ function train_stochastic_interpolant(
 
 
 
-            x = model.ode_sample(num_samples, ps, st_, rng, dev)
+            # x = model.ode_sample(num_samples, ps, st_, rng, dev)
                         
-            x = x |> cpu_dev
-            #x = x[:, :, 1, :]
-            x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
+            # x = x |> cpu_dev
+            # #x = x[:, :, 1, :]
+            # x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
 
-            plot_list = []
-            for i in 1:9
-                push!(plot_list, heatmap(x[:, :, i])); 
-            end
+            # plot_list = []
+            # for i in 1:9
+            #     push!(plot_list, heatmap(x[:, :, i])); 
+            # end
 
-            save_dir = joinpath("output/train/images/", @sprintf("ode_img_%i.pdf", epoch))
-            savefig(plot(plot_list..., layout=(3,3)), save_dir)
+            # save_dir = joinpath("output/train/images/", @sprintf("ode_img_%i.pdf", epoch))
+            # savefig(plot(plot_list..., layout=(3,3)), save_dir)
 
         end
 
@@ -253,7 +253,7 @@ end
         trainset_init_distribution::AbstractArray=nothing,
         init_and_target_are_correlated=false,
         train_time_stepping=false,
-        dev=gpu
+        dev=gpu_device()
     )
 
 Train the Stochastic Interpolant model.
@@ -266,23 +266,23 @@ function train_stochastic_interpolant(
     trainset_target_distribution::AbstractArray,
     num_epochs::Int,
     batch_size::Int,
-    num_samples::Int,
+    num_steps::Int,
     rng::AbstractRNG,
     trainset_init_distribution=nothing,
+    trainset_pars_distribution=nothing,
     train_time_stepping=false,
-    dev=gpu
+    dev=gpu_device()
 )
 
     min_lr = 1e-5
     max_lr = 1e-3 
 
-    num_steps = num_samples
-
     output_sde = true
     output_ode = false
 
     if train_time_stepping
-        original_init_condition = trainset_init_distribution[:, :, :, 1:num_steps]
+        original_init_condition = trainset_init_distribution[:, :, :, 20*num_steps:21*num_steps]
+        original_pars = trainset_pars_distribution[:, 1:1]
     end
 
     cpu_dev = LuxCPUDevice();
@@ -296,6 +296,7 @@ function train_stochastic_interpolant(
         train_ids = shuffle(rng, 1:num_target)
         trainset_target_distribution = trainset_target_distribution[:, :, :, train_ids]
         trainset_init_distribution = trainset_init_distribution[:, :, :, train_ids]
+        trainset_pars_distribution = trainset_pars_distribution[:, train_ids]
     
         for i in 1:batch_size:size(trainset_target_distribution)[end]
             
@@ -303,12 +304,15 @@ function train_stochastic_interpolant(
                 break
             end
 
-            x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev;
-            x_0 = trainset_init_distribution[:, :, :, i:i+batch_size-1] |> dev;
+            x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev
+            x_0 = trainset_init_distribution[:, :, :, i:i+batch_size-1] |> dev
+            pars = trainset_pars_distribution[:, i:i+batch_size-1] |> dev
+
 
             (loss, st), pb_f = Zygote.pullback(
-                p -> model.loss(x_0, x_1, p, st, rng, dev), ps
+                p -> model.loss(x_0, x_1, pars, p, st, rng, dev), ps
             );
+
 
             running_loss += loss
 
@@ -316,11 +320,7 @@ function train_stochastic_interpolant(
             
             opt_state, ps = Optimisers.update!(opt_state, ps, gs)
 
-            
-
-            if i % 1 == 0
-                CUDA.reclaim()
-            end
+            # remove all arrays from gpu_device
             
         end
 
@@ -331,44 +331,52 @@ function train_stochastic_interpolant(
         
         running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
         
-        (epoch % 5 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
+        (epoch % 1 == 0) && println(lazy"Loss Value after $epoch iterations: $running_loss")
 
-        if epoch % 50 == 0
+        if epoch % 5 == 0
 
             st_ = Lux.testmode(st)
 
-            num_paths = 4
+            num_paths = 10
 
             if output_sde
                 x = zeros(size(original_init_condition)..., num_paths)
                 init_condition = reshape(original_init_condition, size(original_init_condition)..., 1)
-                init_condition = repeat(init_condition, 1, 1, 1, 1, num_paths) |> dev
-                x[:, :, :, 1, :] = init_condition[:, :, :, 1, :]
+                x[:, :, :, 1, :] = repeat(init_condition, 1, 1, 1, 1, num_paths)[:, :, :, 1, :]
+                x_mean = mean(x[:, :, :, 1, :], dims=4)
+                # x_mean = reshape(x_mean, size(x_mean)..., 1)
+
+                pars = repeat(original_pars, 1, num_paths) |> dev
+
 
                 error = []
                 for i in ProgressBar(1:(num_steps - 1))
-                    # init_condition = model.ode_sample(init_condition, ps, st_, dev)
-                    # x[:, :, :, i] = init_condition |> cpu_dev
+
+                    x_mean = repeat(x_mean, 1, 1, 1, num_paths)
                     
-                    # if i % 25 == 0
-                    #     init_condition = original_init_condition[:, :, :, i:i] |> dev
-                    # else
-                    #     init_condition = x[:, :, :, i:i] |> dev
-                    #     init_condition = repeat(init_condition, 1, 1, 1, num_paths)
-                    # end
-                    pred = forecasting_sde_sampler(x[:, :, :, i, :] |> dev, model, ps, st_, 1000, rng, dev)
-                    x[:, :, :, i+1, :] = pred |> cpu_dev
+                    # pred = forecasting_sde_sampler(x[:, :, :, i, :] |> dev, model, ps, st_, 25, rng, dev)
+                    pred = forecasting_sde_sampler(x[:, :, :, i, :] |> dev, pars, model, ps, st_, 25, rng, dev)
+                    pred = pred |> cpu_dev
+                    x[:, :, :, i+1, :] = pred
                     x_mean = mean(x[:, :, :, i+1, :], dims=4)
 
                     push!(error, mean((x_mean - original_init_condition[:, :, :, i+1] ).^2))
 
                     if findmax(abs.(x))[1] > 1e2
+                        print("Trajectory diverged")
+                        break
+                    elseif any(isnan, x)
+                        print("NaN encountered")
                         break
                     end
                 end
 
+                pred = nothing
 
                 println("Time stepping error (SDE): ", mean(error))
+                # x = sqrt.(x[:, :, 2, :, :].^2 + x[:, :, 3, :, :].^2)
+                # x_true = sqrt.(original_init_condition[:, :, 2, :].^2 + original_init_condition[:, :, 3, :].^2)
+
                 x = sqrt.(x[:, :, 1, :, :].^2 + x[:, :, 2, :, :].^2)
                 x_true = sqrt.(original_init_condition[:, :, 1, :].^2 + original_init_condition[:, :, 2, :].^2)
 
@@ -377,8 +385,12 @@ function train_stochastic_interpolant(
 
                 save_path = @sprintf("output/sde_SI_%i.gif", epoch)
 
-                preds_to_save = (x_mean, x_true, x_mean-x_true, x_std, x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
-                create_gif(preds_to_save, save_path, ["Pred mean", "True", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
+                preds_to_save = (x_true, x_mean, x_mean-x_true, x_std, x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
+                create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
+
+                CUDA.reclaim()
+                GC.gc()
+            
             end
 
             if output_ode
@@ -395,7 +407,7 @@ function train_stochastic_interpolant(
                     else
                         init_condition = x[:, :, :, i:i] |> dev
                     end
-                    pred = forecasting_ode_sampler(init_condition, model, ps, st_, 500, dev)
+                    pred = forecasting_ode_sampler(init_condition, model, ps, st_, 100, dev)
 
                     x[:, :, :, i+1] = pred |> cpu_dev
                     
@@ -409,11 +421,15 @@ function train_stochastic_interpolant(
 
                 println("Time stepping error (ODE): ", mean(error))
 
-                x = sqrt.(x[:, :, 1, :].^2 + x[:, :, 2, :].^2)
-                x_true = sqrt.(original_init_condition[:, :, 1, :].^2 + original_init_condition[:, :, 2, :].^2)
+                x = sqrt.(x[:, :, 2, :].^2 + x[:, :, 3, :].^2)
+                x_true = sqrt.(original_init_condition[:, :, 2, :].^2 + original_init_condition[:, :, 3, :].^2)
 
                 save_path = @sprintf("output/ode_SI_%i.gif", epoch)
                 create_gif(x, x_true, x-x_true, save_path)
+
+
+                CUDA.reclaim()
+                GC.gc()
             end
             
 

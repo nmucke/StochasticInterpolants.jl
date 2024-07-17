@@ -16,10 +16,10 @@ using LuxCUDA
         max_freq=1000.0f0, 
         embedding_dims=32,
         timesteps::Int=100,
-        init_beta::T=0.0001, 
-        final_beta::T=0.02,
+        init_beta::AbstractFloat=0.0001, 
+        final_beta::AbstractFloat=0.02,
         type::String="linear"
-    ) where T <: AbstractFloat
+    )
     
 
 Creates a Denoising Diffusion Probabilistic Model (DDPM) with a UNet architecture.
@@ -42,10 +42,10 @@ function DenoisingDiffusionProbabilisticModel(
     max_freq=1000.0f0, 
     embedding_dims=32,
     timesteps::Int=100,
-    init_beta::T=0.0001, 
-    final_beta::T=0.02,
+    init_beta::AbstractFloat=0.0001, 
+    final_beta::AbstractFloat=0.02,
     type::String="linear"
-) where T <: AbstractFloat
+)
 
     unet = UNet(
         image_size; 

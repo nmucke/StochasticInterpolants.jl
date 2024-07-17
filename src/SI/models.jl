@@ -13,7 +13,7 @@ using DifferentialEquations
         sde_sample::Function,
         ode_sample::Function,
         interpolant::Function
-    ) where T <: AbstractFloat
+    )
     
 
 A container layer for the Stochastic Interpolant model
@@ -21,8 +21,8 @@ A container layer for the Stochastic Interpolant model
 struct StochasticInterpolantModel <: Lux.AbstractExplicitContainerLayer{
     (:velocity, :score)
 }
-    velocity::UNet
-    score::UNet
+    velocity::Lux.AbstractExplicitLayer
+    score::Lux.AbstractExplicitLayer
     sde_sample::Function
     ode_sample::Function
     interpolant::Function
@@ -56,14 +56,26 @@ function StochasticInterpolantModel(
     num_steps=100,
 )
     
-    velocity = UNet(
-        image_size; 
-        in_channels=in_channels,
-        channels=channels, 
-        block_depth=block_depth,
-        min_freq=min_freq, 
-        max_freq=max_freq, 
-        embedding_dims=embedding_dims,
+    # velocity = UNet(
+    #     image_size; 
+    #     in_channels=in_channels,
+    #     channels=channels, 
+    #     block_depth=block_depth,
+    #     min_freq=min_freq, 
+    #     max_freq=max_freq, 
+    #     embedding_dims=embedding_dims,
+    # )
+
+    velocity = DiffusionTransformer(
+        image_size;
+        in_channels=in_channels, 
+        patch_size=(8, 8),
+        embed_dim=256, 
+        depth=4, 
+        number_heads=8,
+        mlp_ratio=4.0f0, 
+        dropout_rate=0.1f0, 
+        embedding_dropout_rate=0.1f0,
     )
 
     interpolant = StochasticInterpolants.linear_interpolant
@@ -85,14 +97,26 @@ function StochasticInterpolantModel(
 
     if sde_enabled
 
-        score = UNet(
-            image_size; 
-            in_channels=in_channels,
-            channels=channels, 
-            block_depth=block_depth,
-            min_freq=min_freq, 
-            max_freq=max_freq, 
-            embedding_dims=embedding_dims,
+        # score = UNet(
+        #     image_size; 
+        #     in_channels=in_channels,
+        #     channels=channels, 
+        #     block_depth=block_depth,
+        #     min_freq=min_freq, 
+        #     max_freq=max_freq, 
+        #     embedding_dims=embedding_dims,
+        # )
+
+        score = DiffusionTransformer(
+            image_size;
+            in_channels=in_channels, 
+            patch_size=(8, 8),
+            embed_dim=256, 
+            depth=4, 
+            number_heads=8,
+            mlp_ratio=4.0f0, 
+            dropout_rate=0.1f0, 
+            embedding_dropout_rate=0.1f0,
         )
 
 

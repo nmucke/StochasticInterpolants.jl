@@ -1,0 +1,517 @@
+using Lux
+using Random
+using CUDA
+using NNlib
+using Setfield
+using ArrayPadding
+using LinearAlgebra
+using Boltz
+# import Boltz.VisionTransformerEncoder
+import Boltz.MultiHeadAttention as MultiHeadAttention
+
+
+
+###############################################################################
+# Diffusion Transformer
+###############################################################################
+
+"""
+    modulate(x, scale, shift)
+
+Modulate the input tensor `x` by scaling and shifting it.
+"""
+
+function modulate(x, scale, shift)
+
+    # Scale
+    x = x .* (1.0f0 .+ scale)
+
+    # Shift
+    x = x .+ shift    
+
+    return x
+end
+
+"""
+    patchify(
+        imsize::Tuple{Int, Int}=(64, 64),
+        in_channels::Int=3,
+        patch_size::Tuple{Int, Int}=(8, 8),
+        embed_planes::Int=128,
+        norm_layer=Returns(Lux.NoOpLayer()),
+        flatten=true
+    )
+
+Create a patch embedding layer with the given image size, number of input
+channels, patch size, embedding planes, normalization layer, and flatten flag.
+
+Based on https://github.com/LuxDL/Boltz.jl/blob/v0.3.9/src/vision/vit.jl#L48-L61
+"""
+function patchify(
+    imsize::Tuple{Int, Int}; 
+    in_channels=3, 
+    patch_size=(8, 8),
+    embed_planes=128, 
+    norm_layer=Returns(Lux.NoOpLayer()), 
+    flatten=true
+)
+
+    im_width, im_height = imsize
+    patch_width, patch_height = patch_size
+
+    @assert (im_width % patch_width == 0) && (im_height % patch_height == 0)
+
+    return Lux.Chain(Lux.Conv(patch_size, in_channels => embed_planes; stride=patch_size),
+        flatten ? Boltz._flatten_spatial : identity, norm_layer(embed_planes))
+end
+
+"""
+    unpatchify(x, patch_size, out_channels)
+
+Unpatchify the input tensor `x` with the given patch size and number of output
+channels.
+"""
+
+function unpatchify(x, imsize, patch_size, out_channels)
+    
+    c = out_channels
+    p1, p2 = patch_size
+    h, w = imsize
+    @assert h * w == size(x, 2)
+
+    x = reshape(x, (p1, p2, c, h, w, size(x, 3)))
+    x = permutedims(x, (1, 4, 2, 5, 3, 6))
+    imgs = reshape(x, (h * p1, w * p2, c, size(x, 6)))
+    return imgs
+end
+
+
+"""
+    VisionTransformerEncoder(in_planes, depth, number_heads; mlp_ratio = 4.0f0,
+        dropout = 0.0f0)
+
+Transformer as used in the base ViT architecture.
+
+## Arguments
+
+  - `in_planes`: number of input channels
+  - `depth`: number of attention blocks
+  - `number_heads`: number of attention heads
+
+## Keyword Arguments
+
+  - `mlp_ratio`: ratio of MLP layers to the number of input channels
+  - `dropout_rate`: dropout rate
+
+## References
+
+[1] Dosovitskiy, Alexey, et al. "An image is worth 16x16 words: Transformers for image
+recognition at scale." arXiv preprint arXiv:2010.11929 (2020).
+"""
+function VisionTransformerEncoder(
+        in_planes, depth, number_heads; mlp_ratio=4.0f0, dropout_rate=0.0f0)
+    hidden_planes = floor(Int, mlp_ratio * in_planes)
+    layers = [Lux.Chain(
+                  Lux.SkipConnection(
+                      Lux.Chain(Lux.LayerNorm((in_planes, 1); affine=true),
+                        MultiHeadAttention(
+                              in_planes, number_heads; attention_dropout_rate=dropout_rate,
+                              projection_dropout_rate=dropout_rate)),
+                      +),
+                  Lux.SkipConnection(
+                      Lux.Chain(Lux.LayerNorm((in_planes, 1); affine=true),
+                          Lux.Chain(Lux.Dense(in_planes => hidden_planes, NNlib.gelu),
+                              Lux.Dropout(dropout_rate),
+                              Lux.Dense(hidden_planes => in_planes),
+                              Lux.Dropout(dropout_rate));
+                          disable_optimizations=true),
+                      +)) for _ in 1:depth]
+    return Lux.Chain(layers...; disable_optimizations=true)
+end
+
+
+function reshape_modulation(x, seq_len)
+
+    x = reshape(x, size(x)[1], 1, size(x)[2])
+    x = repeat(x, 1, seq_len, 1)
+
+    return x
+end
+
+
+
+
+"""
+    DiffusionTransformerBlock(
+        in_channels::Int, 
+        out_channels::Int,
+        block_depth::Int
+    )
+    
+Create a diffusion transformer block
+"""
+struct DiffusionTransformerBlock <: Lux.AbstractExplicitContainerLayer{
+    (:layer_norm_1, :layer_norm_2, :attention, :mlp, :adaLN_modulation)
+}
+    layer_norm_1::Lux.LayerNorm
+    layer_norm_2::Lux.LayerNorm
+    attention::MultiHeadAttention
+    mlp::Chain
+    adaLN_modulation::Lux.Chain
+    hidden_size::Int
+    #reshape_modulation::Function
+end
+
+function DiffusionTransformerBlock(
+    hidden_size::Int, 
+    num_heads::Int,
+    mlp_ratio=4.0f0,    
+)
+
+    layer_norm_1 = Lux.LayerNorm((hidden_size, 1); affine=true)
+    layer_norm_2 = Lux.LayerNorm((hidden_size, 1); affine=true)
+
+    attention = MultiHeadAttention(
+        hidden_size, num_heads; 
+        attention_dropout_rate=0.1f0,
+        projection_dropout_rate=0.1f0
+    )
+
+    mlp_hidden_dim = floor(Int, mlp_ratio * hidden_size)
+    mlp = Chain(
+        Lux.Dense(hidden_size => mlp_hidden_dim, NNlib.gelu),
+        Lux.Dropout(0.1f0),
+        Lux.Dense(mlp_hidden_dim => hidden_size),
+    )
+
+    adaLN_modulation = Lux.Chain(
+        NNlib.gelu,
+        Lux.Dense(hidden_size => 6 * hidden_size),
+    )
+
+
+    return DiffusionTransformerBlock(
+        layer_norm_1, 
+        layer_norm_2, 
+        attention, 
+        mlp, 
+        adaLN_modulation,
+        hidden_size,
+    )
+end
+
+function (dit_block::DiffusionTransformerBlock)(
+    input, 
+    ps,
+    st::NamedTuple
+)
+    x, c = input
+
+    modulation, st_new = dit_block.adaLN_modulation(c, ps.adaLN_modulation, st.adaLN_modulation)
+    @set! st.adaLN_modulation = st_new
+
+    shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = Boltz._fast_chunk(modulation, Val(6), Val(1))
+
+    shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = reshape_modulation.(
+        (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp), size(x, 2)
+    )
+
+
+    x, st_new = dit_block.layer_norm_1(x, ps.layer_norm_1, st.layer_norm_1)
+    @set! st.layer_norm_1 = st_new
+    x = modulate(x, scale_msa, shift_msa)
+
+    attn, st_new = dit_block.attention(x, ps.attention, st.attention)
+    @set! st.attention = st_new
+    x = x .+ gate_msa .* attn
+
+    x, st_new = dit_block.layer_norm_2(x, ps.layer_norm_2, st.layer_norm_2)
+    @set! st.layer_norm_2 = st_new
+    x = modulate(x, scale_mlp, shift_mlp)
+    mlp_out, st_new = dit_block.mlp(x, ps.mlp, st.mlp)
+    x = x .+ gate_mlp .* mlp_out
+    @set! st.mlp = st_new
+
+    return x, st
+end
+
+
+"""
+    FinalLayer(
+        hidden_size::Int, 
+        patch_size::Int, 
+        out_channels::Int
+    )
+
+Create the final layer of the diffusion transformer
+"""
+
+struct FinalLayer <: Lux.AbstractExplicitContainerLayer{
+    (:norm_final, :dense, :adaLN_modulation)
+}
+    norm_final::Lux.LayerNorm
+    dense::Lux.Dense
+    adaLN_modulation::Lux.Chain
+end
+
+function FinalLayer(
+    hidden_size::Int, 
+    patch_size::Tuple{Int, Int}, 
+    out_channels::Int
+)
+
+    norm_final = Lux.LayerNorm((hidden_size, 1); affine=false)
+    adaLN_modulation = Lux.Chain(
+        NNlib.gelu,
+        Lux.Dense(hidden_size => 2 * hidden_size)
+    )
+    dense = Lux.Dense(hidden_size => patch_size[1] * patch_size[2] * out_channels)
+
+    return FinalLayer(norm_final, dense, adaLN_modulation)
+end
+
+function (final_layer::FinalLayer)(
+    input,
+    ps,
+    st::NamedTuple
+)
+
+    x, t = input
+
+    modulation, st_new = final_layer.adaLN_modulation(t, ps.adaLN_modulation, st.adaLN_modulation)
+    @set! st.adaLN_modulation = st_new
+
+    shift, scale = Boltz._fast_chunk(modulation, Val(2), Val(1))
+    shift, scale = reshape_modulation.((shift, scale), size(x, 2))
+
+    x, st_new = final_layer.norm_final(x, ps.norm_final, st.norm_final)
+    @set! st.norm_final = st_new
+
+    x = modulate(x, scale, shift)
+
+    x, st_new = final_layer.dense(x, ps.dense, st.dense)
+    @set! st.dense = st_new
+
+    return x, st
+end
+
+    
+    
+"""
+    DiffusionTransformer(
+        imsize::Dims{2}=(256, 256),
+        in_channels::Int=3,
+        patch_size::Dims{2}=(16, 16),
+        embed_planes::Int=768,
+        depth::Int=6,
+        number_heads=16,
+        mlp_ratio=4.0f0,
+        dropout_rate=0.1f0,
+        embedding_dropout_rate=0.1f0,
+        pool::Symbol=:class,
+        num_classes::Int=1000,
+        kwargs...
+    )
+
+Create a DiffusionTransformer Transformer model with the given image size, number of input
+channels, patch size, embedding planes, depth, number of heads, MLP ratio,
+dropout rate, embedding dropout rate, pooling method, number of classes, and
+additional keyword arguments.
+
+Based on https://github.com/LuxDL/Boltz.jl/blob/v0.3.9/src/vision/vit.jl#L48-L61
+The architecture is based on https://arxiv.org/abs/2212.09748
+"""
+struct DiffusionTransformer <: Lux.AbstractExplicitContainerLayer{
+    (:t_embedding, :patchify_layer, :positional_embedding, :dit_blocks, :final_layer)#, :conv)
+}
+    t_embedding::Lux.Chain
+    patchify_layer::Lux.Chain
+    positional_embedding::Lux.AbstractExplicitLayer
+    dit_blocks::Lux.AbstractExplicitLayer
+    final_layer::Lux.AbstractExplicitLayer
+    unpatchify::Function
+    # conv::Lux.Chain
+    
+end
+
+function DiffusionTransformer(
+    imsize::Tuple{Int, Int};
+    in_channels::Int=3, 
+    out_channels=nothing,
+    patch_size::Tuple{Int, Int}=(16, 16),
+    embed_dim::Int=768, 
+    depth::Int=6, 
+    number_heads=16,
+    mlp_ratio=4.0f0, 
+    dropout_rate=0.1f0, 
+    embedding_dropout_rate=0.1f0,
+    pars_dim=128
+)
+
+    if isnothing(out_channels)
+        out_channels = in_channels
+    end
+
+    number_patches = prod(imsize .÷ patch_size)
+
+    # t_embedding = Lux.Chain(
+    #     x -> sinusoidal_embedding(x, 1.0f0, 1000.0f0, embed_dim),
+    #     x -> reshape(x, embed_dim, size(x, 4)),
+    #     Lux.Dense(embed_dim => embed_dim),
+    #     NNlib.gelu,
+    #     Lux.Dense(embed_dim => embed_dim)
+    # )
+    # if temporal_embedding
+    #     pars_embedding(x) = Lux.Chain(
+    #         sinusoidal_embedding(x, 1.0f0, 1000.0f0, embed_dim),
+    #         x -> x[1, 1, :, :],
+    #     )
+    # else
+    #     pars_embedding = Lux.Dense(pars_dim => embed_dim)
+    # end
+    t_embedding = Lux.Chain(
+        Lux.Dense(pars_dim => embed_dim),
+        NNlib.gelu,
+        Lux.Dense(embed_dim => embed_dim)
+    )
+
+    patchify_layer = patchify(
+        imsize; 
+        in_channels=in_channels, 
+        patch_size=patch_size, 
+        embed_planes=embed_dim
+    )
+
+    positional_embedding = Boltz.ViPosEmbedding(embed_dim, number_patches)
+
+    # dit_blocks = [DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio), ]
+    # for _ in 1:depth
+    #     push!(dit_blocks, DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio))
+    # end
+    # dit_blocks = Chain(dit_blocks...; disable_optimizations=true)
+    dit_blocks = Chain(
+        [DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio) for _ in 1:depth]...;
+    )
+
+    final_layer = FinalLayer(embed_dim, patch_size, out_channels) # (E, patch_size ** 2 * out_channels, N)
+
+    h = div(imsize[1], patch_size[1])
+    w = div(imsize[2], patch_size[2])
+    _unpatchify(x) = unpatchify(x, (h, w), patch_size, out_channels)
+
+    return DiffusionTransformer(t_embedding, patchify_layer, positional_embedding, dit_blocks, final_layer, _unpatchify)
+end
+
+function (dt::DiffusionTransformer)(
+    input, 
+    ps::NamedTuple,
+    st::NamedTuple
+)
+
+    x, t = input
+
+    t, st_new = dt.t_embedding(t, ps.t_embedding, st.t_embedding)
+    @set! st.t_embedding = st_new
+
+    x, st_new = dt.patchify_layer(x, ps.patchify_layer, st.patchify_layer)
+    @set! st.patchify_layer = st_new
+
+    x, st_new = dt.positional_embedding(x, ps.positional_embedding, st.positional_embedding)
+    @set! st.positional_embedding = st_new
+
+    # for i in 1:length(dt.dit_blocks)
+    #     layer_name = Symbol(:layer_, i)
+    #     x, st_new = dt.dit_blocks[i](
+    #         (x, t), 
+    #         ps.dit_blocks[layer_name],
+    #         st.dit_blocks[layer_name]
+    #     )
+    #     @set! st.dit_blocks[layer_name] = st_new
+    # end
+    x, st_new = dt.dit_blocks((x, t), ps.dit_blocks, st.dit_blocks)
+    @set! st.dit_blocks = st_new
+
+
+
+    x, st_new = dt.final_layer((x, t), ps.final_layer, st.final_layer)
+    @set! st.final_layer = st_new
+
+
+    x = dt.unpatchify(x)
+
+    return x, st
+end
+
+
+"""
+ConditionalDiffusionTransformer(
+        imsize::Dims{2}=(256, 256),
+        in_channels::Int=3,
+        patch_size::Dims{2}=(16, 16),
+        embed_planes::Int=768,
+        depth::Int=6,
+        number_heads=16,
+        mlp_ratio=4.0f0,
+        dropout_rate=0.1f0,
+        embedding_dropout_rate=0.1f0,
+        kwargs...
+    )
+
+Create a DiffusionTransformer Transformer model with the given image size, number of input
+channels, patch size, embedding planes, depth, number of heads, MLP ratio,
+dropout rate, embedding dropout rate, pooling method, number of classes, and
+additional keyword arguments.
+
+Based on https://github.com/LuxDL/Boltz.jl/blob/v0.3.9/src/vision/vit.jl#L48-L61
+The architecture is based on https://arxiv.org/abs/2212.09748
+"""
+struct ConditionalDiffusionTransformer <: Lux.AbstractExplicitContainerLayer{
+    (:dit, )
+}
+    dit::Lux.AbstractExplicitLayer
+end
+
+
+
+function ConditionalDiffusionTransformer(
+    imsize::Tuple{Int, Int};
+    in_channels::Int=3, 
+    patch_size::Tuple{Int, Int}=(16, 16),
+    embed_dim::Int=768, 
+    depth::Int=6, 
+    number_heads=16,
+    mlp_ratio=4.0f0, 
+    dropout_rate=0.1f0, 
+    embedding_dropout_rate=0.1f0,
+)
+
+    dit = DiffusionTransformer(
+        imsize; 
+        in_channels=in_channels*2,
+        out_channels=in_channels,
+        patch_size=patch_size, 
+        embed_dim=embed_dim, 
+        depth=depth, 
+        number_heads=number_heads, 
+        mlp_ratio=mlp_ratio, 
+        dropout_rate=dropout_rate, 
+        embedding_dropout_rate=embedding_dropout_rate, 
+    )
+
+    return ConditionalDiffusionTransformer(dit)
+end
+
+function (cdt::ConditionalDiffusionTransformer)(
+    input, 
+    ps::NamedTuple,
+    st::NamedTuple
+)
+
+    x, x0, t = input
+
+    x = cat(x, x0; dims=3)
+
+    x, st = cdt.dit((x, t), ps, st)
+
+    return x, st
+end

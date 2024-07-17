@@ -18,7 +18,7 @@ using LuxCUDA
         num_samples::Int,
         num_steps::Int,
         eps::Float32,
-        dev=gpu
+        dev=gpu_device()
     )
 
     Samples from the SMLD model using the Euler-Maruyama method
@@ -33,7 +33,7 @@ function euler_maruyama_sampler(
     num_samples::Int,
     num_steps::Int,
     eps::AbstractFloat,
-    dev=gpu
+    dev=gpu_device()
 )
     t = ones((1, 1, 1, num_samples)) |> dev
     x = randn(rng, Float32, model.upsample.size..., model.conv_in.in_chs, num_samples) |> dev
@@ -70,7 +70,7 @@ function smld_sde_sampler(
     num_samples::Int,
     num_steps::Int,
     eps::AbstractFloat,
-    dev=gpu
+    dev=gpu_device()
 )
 
             
@@ -114,7 +114,7 @@ function smld_ode_sampler(
     num_samples::Int,
     num_steps::Int,
     eps::AbstractFloat,
-    dev=gpu
+    dev=gpu_device()
 )
 
             

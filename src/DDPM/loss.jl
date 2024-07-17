@@ -14,7 +14,7 @@ function get_loss(
     ps::NamedTuple, 
     st::NamedTuple, 
     rng::AbstractRNG,
-    dev=gpu
+    dev=gpu_device()
 )
 
     x_noisy, noise = forward_diffusion_sample(x_0, t, rng, model.noise_scheduling, dev)

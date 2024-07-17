@@ -13,10 +13,10 @@ Based on https://colab.research.google.com/drive/1sjy9odlSSy0RBVgMTgP7s99NXsqgls
 """
 function get_beta_schedule(
     timesteps::Int;
-    init_beta::T=0.0001, 
-    final_beta::T=0.02,
+    init_beta::AbstractFloat=0.0001, 
+    final_beta::AbstractFloat=0.02,
     type::String="linear"
-) where {T <: AbstractFloat}
+)
 
     if type == "linear"
         return range(init_beta, final_beta; length=timesteps)
@@ -98,7 +98,7 @@ end
         t::AbstractArray, 
         rng::AbstractRNG, 
         noise_scheduling::NoiseScheduling, 
-        dev=gpu
+        dev=gpu_device()
     )
 
 Samples the forward diffusion process.
