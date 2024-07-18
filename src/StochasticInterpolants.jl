@@ -53,6 +53,8 @@ include("SI/conditional_models.jl")
 include("SI/forecasting_models.jl")
 include("SI/sampling.jl")
 include("SI/loss.jl")
+include("SI/training.jl")
+include("SI/time_stepping.jl")
 
 # Models
 export StochasticInterpolantModel
@@ -66,8 +68,7 @@ export SDE_runge_kutta
 export forecasting_sde_sampler
 export forecasting_ode_sampler
 export SDE_heun
-# export sample_sde
-# export sample_ode
+export ODE_runge_kutta
 
 # Interpolants
 export linear_interpolant
@@ -76,11 +77,33 @@ export linear_interpolant
 export get_loss
 export get_forecasting_loss
 
+# Training
+export train_stochastic_interpolant
+
+# Time stepping
+export compute_multiple_SDE_steps
+export compute_multiple_ODE_steps
+
 
 
 ##### Utils #####
 include("plotting_utils.jl")
+include("checkpoint_utils.jl")
+include("data_utils.jl")
+include("preprocessing_utils.jl")
+
+# Plotting
 export create_gif
+
+# Checkpoint
+export save_checkpoint
+export load_checkpoint
+
+# Data
+export load_transonic_cylinder_flow_data
+
+# Preprocessing
+export NormalizeData
 
 
 ##### Training #####
@@ -126,7 +149,6 @@ export ScoreMatchingLangevinDynamics
 export euler_maruyama_sampler
 export smld_sde_sampler
 export smld_ode_sampler
-
 
 
 

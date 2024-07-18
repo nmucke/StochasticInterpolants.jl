@@ -46,15 +46,17 @@ function ForecastingStochasticInterpolant(
     max_freq=1000.0f0,
     embedding_dims=32,
     num_steps=100,
+    diffusion_multiplier=0.1f0,
     dev=gpu_device()
 )
 
-    diff_multiplier = 0.5f0 |> dev
+    diffusion_multiplier = diffusion_multiplier |> dev
 
-    gamma(t) = diff_multiplier .* (1 .- t) |> dev
-    dgamma_dt(t) = -diff_multiplier .* ones(size(t))  |> dev
+    gamma(t) = diffusion_multiplier .* (1 .- t) |> dev
+    dgamma_dt(t) = -diffusion_multiplier .* ones(size(t))  |> dev
 
-    diffusion_coefficient(t) = diff_multiplier .* sqrt.((3 .- t) .* (1 .- t)) |> dev
+    # diffusion_coefficient(t) = diffusion_multiplier .* sqrt.((3 .- t) .* (1 .- t)) |> dev
+    diffusion_coefficient(t) = diffusion_multiplier .* gamma(t) |> dev
 
     alpha(t) = 1 .- t |> dev
     dalpha_dt(t) = -1 |> dev
@@ -90,7 +92,7 @@ function ForecastingStochasticInterpolant(
     #     max_freq=max_freq, 
     #     embedding_dims=embedding_dims
     # )
-    velocity =  ParsConvNextUNet(
+    velocity = ParsConvNextUNet(
         image_size; 
         in_channels=in_channels,
         channels=channels, 

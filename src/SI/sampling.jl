@@ -269,13 +269,15 @@ function SDE_heun(
         dW = sqrt(dt) .* z
 
         # Predictor from Euler step
-        predictor = x + drift_term(t_drift, x, pars, ps, st) .* dt + diffusion_term(t_diffusion, x, pars, ps, st) .* dW
+        predictor_drift, st = drift_term(t_drift, x, pars, ps, st)
+        predictor = x .+ predictor_drift .* dt .+ diffusion_term(t_diffusion, x, pars, ps, st) .* dW
 
         # Corrector from Heun step
-        drift_corrector = 0.5 * (drift_term(t_drift, x, pars, ps, st) + drift_term(t_drift .+ dt, predictor, pars, ps, st))
-        diffusion_corrector = 0.5 * (diffusion_term(t_diffusion, x, pars, ps, st) + diffusion_term(t_diffusion .+ dt, predictor, pars, ps, st))
+        heun_drift, st = drift_term(t_drift .+ dt, predictor, pars, ps, st)
+        drift_corrector = 0.5f0 * (predictor_drift .+ heun_drift)
+        diffusion_corrector = 0.5f0 * (diffusion_term(t_diffusion, x, pars, ps, st) .+ diffusion_term(t_diffusion .+ dt, predictor, pars, ps, st))
 
-        x = x + drift_corrector .* dt + diffusion_corrector .* dW
+        x = x .+ drift_corrector .* dt + diffusion_corrector .* dW
 
     end
 
@@ -393,8 +395,52 @@ function forecasting_sde_sampler(
 
 end
 
+
+function ODE_runge_kutta(
+    drift_term::Function,
+    x::AbstractArray,
+    pars::AbstractArray,
+    timesteps::AbstractArray,
+    ps::NamedTuple,
+    st::NamedTuple,
+    dev=gpu_device()
+)
+
+    num_steps = length(timesteps)
+    dt = Float32(timesteps[2] - timesteps[1]) |> dev
+
+    for i = 1:(num_steps-1)
+
+        t_drift = timesteps[i] .* ones(Float32, 1) |> dev
+
+        X0 = x
+        t0_drift = t_drift
+        F0, st = drift_term(t0_drift, X0, pars, ps, st)
+
+        X1 = x .+ 0.5f0 .* F0 .* dt
+        t1_drift = t_drift .+ 0.5f0 .* dt
+        F1, st = drift_term(t1_drift, X1, pars, ps, st)
+
+        X2 = x .+ 0.5f0 .* F1 .* dt
+        t2_drift = t_drift .+ 0.5f0 .* dt
+        F2, st = drift_term(t2_drift, X2, pars, ps, st)
+
+        X3 = x .+ F2 .* dt
+        t3_drift = t_drift .+ dt
+        F3, st = drift_term(t3_drift, X3, pars, ps, st)
+
+        drift_t = (F0 .+ 2 .* F1 .+ 2 .* F2 .+ F3) ./ 6 .* dt
+
+        x = x .+ drift_t
+
+    end
+
+    return x
+end
+
 function forecasting_ode_sampler(
     x_0::AbstractArray,
+    pars::AbstractArray,
     model::ForecastingStochasticInterpolant,
     ps::NamedTuple,
     st::NamedTuple,
@@ -402,27 +448,58 @@ function forecasting_ode_sampler(
     dev=gpu_device()
 )
 
-    t_span = (0.0, 1.0)
+    # define time span
+    timesteps = LinRange(0.0f0, 1.0f0, num_steps) |> dev
 
-    timesteps = LinRange(0, 1, num_steps)# |> dev
-    dt = Float32.(timesteps[2] - timesteps[1]) |> dev
+    x_0 = x_0 |> dev
 
-    stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(model.velocity, nothing, st)
+    drift_term(t, x, pars, ps, st) = model.velocity((x, x_0, pars, t), ps, st)
 
-    dudt(u, p, t) = stateful_velocity_NN((u, x_0, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
-
-    # ff = ODEFunction{false}(dudt, g)
-    prob = ODEProblem(dudt, x_0, t_span, ps)
-
-    x = solve(
-        prob,
-        Tsit5(),
-        dt = dt,
-        save_everystep = false, 
-        adaptive = false
+    x = ODE_runge_kutta(
+        drift_term,
+        x_0,
+        pars,
+        timesteps,
+        ps,
+        st,
+        dev
     )
-    x = x[:, :, :, :, end]
 
     return x
 
 end
+
+
+# function forecasting_ode_sampler(
+#     x_0::AbstractArray,
+#     model::ForecastingStochasticInterpolant,
+#     ps::NamedTuple,
+#     st::NamedTuple,
+#     num_steps::Int,
+#     dev=gpu_device()
+# )
+
+#     t_span = (0.0, 1.0)
+
+#     timesteps = LinRange(0, 1, num_steps)# |> dev
+#     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
+
+#     stateful_velocity_NN = Lux.Experimental.StatefulLuxLayer(model.velocity, nothing, st)
+
+#     dudt(u, p, t) = stateful_velocity_NN((u, x_0, t .* ones(1, 1, 1, size(u)[end])) |> dev, p)
+
+#     # ff = ODEFunction{false}(dudt, g)
+#     prob = ODEProblem(dudt, x_0, t_span, ps)
+
+#     x = solve(
+#         prob,
+#         Tsit5(),
+#         dt = dt,
+#         save_everystep = false, 
+#         adaptive = false
+#     )
+#     x = x[:, :, :, :, end]
+
+#     return x
+
+# end
