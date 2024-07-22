@@ -4,5 +4,8 @@
 *.pdf
 *.jld2
 *.gif
+*.bson
 
 data/
+
+tmp/

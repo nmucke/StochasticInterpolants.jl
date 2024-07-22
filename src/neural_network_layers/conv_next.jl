@@ -601,8 +601,8 @@ struct ParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     (
         :conv_in, :init_conv_in, :conv_out, :conv_down_blocks, 
         :down_blocks, :bottleneck1, :bottleneck2, :conv_up_blocks, 
-        :up_blocks, :t_embedding, :pars_embedding, #:dit_down_blocks,
-        :bottleneck_dit #, :dit_up_blocks
+        :up_blocks, :t_embedding, :pars_embedding, :dit_down_blocks,
+        :bottleneck_dit, :dit_up_blocks
     )
 }
     conv_in::Lux.AbstractExplicitLayer
@@ -616,9 +616,9 @@ struct ParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     up_blocks::Lux.AbstractExplicitLayer
     t_embedding::Lux.AbstractExplicitLayer
     pars_embedding::Lux.AbstractExplicitLayer
-    # dit_down_blocks::Lux.AbstractExplicitLayer
+    dit_down_blocks::Lux.AbstractExplicitLayer
     bottleneck_dit::Lux.AbstractExplicitLayer
-    # dit_up_blocks::Lux.AbstractExplicitLayer
+    dit_up_blocks::Lux.AbstractExplicitLayer
 end
 
 function ParsConvNextUNet(
@@ -682,17 +682,17 @@ function ParsConvNextUNet(
             end
         )
 
-        # push!(dit_down_blocks, parameter_diffusion_transformer_block(
-        #     in_channels=channels[i + 1],
-        #     out_channels=channels[i + 1],
-        #     pars_dim=embedding_dims,
-        #     embed_dim=16,
-        #     number_heads=2,
-        #     mlp_ratio=2,
-        #     imsize=imsize,
-        #     patch_size=(4, 4),
-        #     number_patches=prod(div.(imsize, (4, 4)))
-        # ))
+        push!(dit_down_blocks, parameter_diffusion_transformer_block(
+            in_channels=channels[i + 1],
+            out_channels=channels[i + 1],
+            pars_dim=embedding_dims,
+            embed_dim=channels[i + 1],
+            number_heads=4,
+            mlp_ratio=2,
+            imsize=imsize,
+            patch_size=(1, 1),
+            number_patches=prod(div.(imsize, (1, 1)))
+        ))
 
         push!(down_blocks, Conv(
             (4, 4), 
@@ -704,7 +704,7 @@ function ParsConvNextUNet(
     end
 
     conv_down_blocks = Chain(conv_down_blocks...; disable_optimizations=true)
-    # dit_down_blocks = Chain(dit_down_blocks...; disable_optimizations=true)
+    dit_down_blocks = Chain(dit_down_blocks...; disable_optimizations=true)
     down_blocks = Chain(down_blocks...; disable_optimizations=true)
 
     # # push!(down_blocks, DownBlock(channel_input, channels[1], block_depth))
@@ -736,28 +736,28 @@ function ParsConvNextUNet(
                 in_channels=channels[end],
                 out_channels=channels[end],
                 pars_dim=embedding_dims,
-                embed_dim=256,
-                number_heads=8,
+                embed_dim=channels[end],
+                number_heads=4,
                 mlp_ratio=2,
                 imsize=imsize,
                 patch_size=(1, 1),
                 number_patches=prod(div.(imsize, (1, 1)))
-            ),
-            dit_2 = parameter_diffusion_transformer_block(
-                in_channels=channels[end],
-                out_channels=channels[end],
-                pars_dim=embedding_dims,
-                embed_dim=256,
-                number_heads=8,
-                mlp_ratio=2,
-                imsize=imsize,
-                patch_size=(1, 1),
-                number_patches=prod(div.(imsize, (1, 1)))
-            )
+            ) #,
+            # dit_2 = parameter_diffusion_transformer_block(
+            #     in_channels=channels[end],
+            #     out_channels=channels[end],
+            #     pars_dim=embedding_dims,
+            #     embed_dim=channels[end],
+            #     number_heads=4,
+            #     mlp_ratio=2,
+            #     imsize=imsize,
+            #     patch_size=(1, 1),
+            #     number_patches=prod(div.(imsize, (1, 1)))
+            # )
         ) do x
             x, pars = x
-            x = dit_1((x, pars))
-            dit_2((x, pars))
+            dit_1((x, pars))
+            # dit_2((x, pars))
     end
 
     bottleneck2 = conv_next_block(
@@ -804,17 +804,17 @@ function ParsConvNextUNet(
             end
         )
 
-        # push!(dit_up_blocks, parameter_diffusion_transformer_block(
-        #     in_channels=channels[i + 1],
-        #     out_channels=channels[i + 1],
-        #     pars_dim=embedding_dims,
-        #     embed_dim=16,
-        #     number_heads=2,
-        #     mlp_ratio=2,
-        #     imsize=imsize,
-        #     patch_size=(4, 4),
-        #     number_patches=prod(div.(imsize, (4, 4)))
-        # ))
+        push!(dit_up_blocks, parameter_diffusion_transformer_block(
+            in_channels=channels[i + 1],
+            out_channels=channels[i + 1],
+            pars_dim=embedding_dims,
+            embed_dim=channels[i + 1],
+            number_heads=4,
+            mlp_ratio=2,
+            imsize=imsize,
+            patch_size=(1, 1),
+            number_patches=prod(div.(imsize, (1, 1)))
+        ))
     end
 
     conv_up_blocks = Chain(conv_up_blocks...; disable_optimizations=true)
@@ -841,8 +841,8 @@ function ParsConvNextUNet(
     return ParsConvNextUNet(
         conv_in, init_conv_in, conv_out, conv_down_blocks, 
         down_blocks, bottleneck1, bottleneck2, conv_up_blocks, 
-        up_blocks, t_embedding, pars_embedding, # dit_down_blocks,
-        bottleneck_dit#, dit_up_blocks
+        up_blocks, t_embedding, pars_embedding, dit_down_blocks,
+        bottleneck_dit, dit_up_blocks
     )
 end
 
@@ -880,12 +880,13 @@ function (conv_next_unet::ParsConvNextUNet)(
             (x, t_emb), ps.conv_down_blocks[conv_layer_name], st.conv_down_blocks[conv_layer_name]
         )  
         @set! st.conv_down_blocks[conv_layer_name] = new_st
-        skips = (skips..., x)
 
-        # x, new_st = conv_next_unet.dit_down_blocks[i](
-        #     (x, pars_emb), ps.dit_down_blocks[conv_layer_name], st.dit_down_blocks[conv_layer_name]
-        # )
-        # @set! st.dit_down_blocks[conv_layer_name] = new_st
+        x, new_st = conv_next_unet.dit_down_blocks[i](
+            (x, pars_emb), ps.dit_down_blocks[conv_layer_name], st.dit_down_blocks[conv_layer_name]
+        )
+        @set! st.dit_down_blocks[conv_layer_name] = new_st
+
+        skips = (skips..., x)
 
         x, new_st = conv_next_unet.down_blocks[i](
             x, ps.down_blocks[conv_layer_name], st.down_blocks[conv_layer_name]
@@ -917,16 +918,17 @@ function (conv_next_unet::ParsConvNextUNet)(
         @set! st.up_blocks[layer_name] = new_st
 
 
-        x = cat(x, skips[end-i+1]; dims=3) # cat on channel        
+        x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+              
         x, new_st = conv_next_unet.conv_up_blocks[i](
             (x, t_emb), ps.conv_up_blocks[layer_name], st.conv_up_blocks[layer_name]
         )
         @set! st.conv_up_blocks[layer_name] = new_st
         
-        # x, new_st = conv_next_unet.dit_up_blocks[i](
-        #     (x, pars_emb), ps.dit_up_blocks[layer_name], st.dit_up_blocks[layer_name]
-        # )
-        # @set! st.dit_up_blocks[layer_name] = new_st
+        x, new_st = conv_next_unet.dit_up_blocks[i](
+            (x, pars_emb), ps.dit_up_blocks[layer_name], st.dit_up_blocks[layer_name]
+        )
+        @set! st.dit_up_blocks[layer_name] = new_st
         
     end
 

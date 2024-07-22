@@ -183,11 +183,6 @@ function get_forecasting_loss(
     dev=gpu_device()
 )
     num_steps = 30
-    # t_vec = reshape(range(0f0, 1f0, num_steps), fill(1, ndims(x_0))..., :) |> dev
-    #t_vec = rand(size(x_0)[end], num_steps) |> dev
-
-    #loss = zeros(Float32, (1, 1, 1, size(x_0)[end])) |> dev
-
     loss = 0.0
     batch_size = size(x_0)[end]
     # for i = 1:batch_size
@@ -220,9 +215,14 @@ function get_forecasting_loss(
 
     # copy along last dimension
 
-    t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
+    # t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
+    t = rand!(rng, similar(x_0, 1, 1, 1, batch_size))
+    
 
-    z = randn(rng, size(x_0)) |> dev
+    # z = randn(rng, size(x_0)) |> dev
+    # z = sqrt.(t) .* z
+
+    z = randn!(rng, similar(x_0, size(x_0)))
     z = sqrt.(t) .* z
 
     g = gamma(t) |> dev

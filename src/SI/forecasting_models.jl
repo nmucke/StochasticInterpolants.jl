@@ -52,17 +52,18 @@ function ForecastingStochasticInterpolant(
 
     diffusion_multiplier = diffusion_multiplier |> dev
 
-    gamma(t) = diffusion_multiplier .* (1 .- t) |> dev
-    dgamma_dt(t) = -diffusion_multiplier .* ones(size(t))  |> dev
+    gamma(t) = diffusion_multiplier .* (1f0 .- t) # |> dev
+    # dgamma_dt(t) = -diffusion_multiplier .* ones(size(t))  # |> dev
+    dgamma_dt(t) = -diffusion_multiplier * ones(size(t)) |> dev #fill!(similar(t, size(t)), -diffusion_multiplier)
 
-    # diffusion_coefficient(t) = diffusion_multiplier .* sqrt.((3 .- t) .* (1 .- t)) |> dev
-    diffusion_coefficient(t) = diffusion_multiplier .* gamma(t) |> dev
+    diffusion_coefficient(t) = diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t)) # |> dev
+    # diffusion_coefficient(t) = diffusion_multiplier .* gamma(t) |> dev
 
-    alpha(t) = 1 .- t |> dev
-    dalpha_dt(t) = -1 |> dev
+    alpha(t) = 1f0 .- t # |> dev
+    dalpha_dt(t) = -1f0  # |> dev
 
-    beta(t) = t.^2 |> dev
-    dbeta_dt(t) = 2 .* t |> dev
+    beta(t) = t.^2 # |> dev
+    dbeta_dt(t) = 2f0 .* t # |> dev
 
     interpolant(x_0, x_1, t) = begin
 
@@ -120,19 +121,6 @@ function ForecastingStochasticInterpolant(
         return diffusion_coefficient(t)
     end
 
-    drift_term(t, x, x_0, pars, ps, st) = begin
-
-        vel_t, st = velocity((x, x_0, pars, t), ps, st)
-
-        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
-        A = 1 ./ A;
-
-        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
-
-        score = A .* (beta(t) .* vel_t .- c)
-
-        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
-    end
 
     score(input, vel_t) = begin
 
@@ -147,6 +135,30 @@ function ForecastingStochasticInterpolant(
         # beta_ = repeat(beta(t), size(x_0)[1:3]...)
         
         return A .* (beta(t) .* vel_t .- c)
+    end
+
+    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+
+        vel_t, st = velocity((x, x_0, pars, t), ps, st)
+
+
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
+
+        score = A .* (beta(t) .* vel_t .- c)
+
+        if ode_mode
+
+            # score = 0.5f0 .* score
+
+            out = vel_t
+            
+            return out , st
+        end
+
+        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
     end
 
     # Loss including the score network

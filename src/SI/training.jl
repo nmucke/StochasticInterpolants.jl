@@ -65,6 +65,8 @@ function train_stochastic_interpolant(;
 
     num_target = size(trainset_target_distribution)[end]
 
+    best_loss = 1e8
+
     for epoch in 1:num_epochs
         running_loss = 0.0
 
@@ -109,20 +111,13 @@ function train_stochastic_interpolant(;
 
         if epoch % 1 == 0
 
-            if !isnothing(model_save_dir)
-                save_checkpoint(
-                    ps=ps, 
-                    st=st,
-                    opt_st=opt_state,
-                    output_dir=model_save_dir,
-                    epoch=epoch
-                )
-            end
+            CUDA.reclaim()
+            GC.gc()
 
             st_ = Lux.testmode(st)
 
 
-            if output_sde
+            if false #output_sde
 
                 x = compute_multiple_SDE_steps(
                     init_condition=test_init_condition,
@@ -150,21 +145,37 @@ function train_stochastic_interpolant(;
                 x = x[:, :, 4, :, :]
                 x_true = testset[:, :, 4, :, 1]
 
-                x_mean = mean(x, dims=4)
-                x_std = std(x, dims=4)
+                x_mean = mean(x, dims=4)[:, :, :, 1]
+                x_std = std(x, dims=4)[:, :, :, 1]
 
                 MSE = mean((x_mean - x_true).^2)
                 println("MSE over mean (SDE): ", MSE)
 
                 save_path = @sprintf("output/sde_SI_%i.gif", epoch)
 
-                preds_to_save = (x_true, x_mean, x_mean-x_true, x_std, x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
+                preds_to_save = (x_true, x_mean, Float16.(x_mean-x_true), Float16.(x_std), x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
                 create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
 
                 CUDA.reclaim()
                 GC.gc()
+
+
+
+                if !isnothing(model_save_dir) && MSE < best_loss
+                    save_checkpoint(
+                        ps=ps, 
+                        st=st,
+                        opt_st=opt_state,
+                        output_dir=model_save_dir,
+                        epoch=epoch
+                    )
+
+                    best_loss = MSE
+                end
             
             end
+
+
 
             if output_ode
                 

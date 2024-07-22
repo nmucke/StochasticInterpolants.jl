@@ -5,11 +5,11 @@ function create_gif(A, filename, plot_titles)
     p_list = [];
     for i = 1:length(A)
         p = heatmap(
-            A[i][:,:,1], legend=false, # xticks=false, yticks=false, 
+            A[i][:,:,1], legend=false, xticks=false, yticks=false, 
             clim=(minimum(A[1]), maximum(A[1])), aspect_ratio=:equal, 
             colorbar=true, title=plot_titles[i], color=cgrad(:Spectral_11, rev=true)
         )
-        push!(p_list, p) 
+        push!(p_list, p)
     end
 
     if length(A) > 2 && length(A) % 2 == 0

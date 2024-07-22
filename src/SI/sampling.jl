@@ -262,20 +262,23 @@ function SDE_heun(
 
     for i = 1:(num_steps-1)
 
-        t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
-        t_diffusion = repeat(t_drift, size(x)[1:3]...)   
+        # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
+        t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
+        # t_diffusion = t_drift#timesteps[i:i]#repeat(t_drift, size(x)[1:3]...)   
 
         z = randn(rng, size(x)) |> dev
+        # z = randn!(rng, similar(x, size(x)))
         dW = sqrt(dt) .* z
-
+        
         # Predictor from Euler step
-        predictor_drift, st = drift_term(t_drift, x, pars, ps, st)
-        predictor = x .+ predictor_drift .* dt .+ diffusion_term(t_diffusion, x, pars, ps, st) .* dW
+        predictor_drift, st = drift_term(t, x, pars, ps, st)
+        predictor_diffusion = diffusion_term(t, x, pars, ps, st) 
+        predictor = @. x + predictor_drift * dt + predictor_diffusion * dW
 
         # Corrector from Heun step
-        heun_drift, st = drift_term(t_drift .+ dt, predictor, pars, ps, st)
+        heun_drift, st = drift_term(t .+ dt, predictor, pars, ps, st)
         drift_corrector = 0.5f0 * (predictor_drift .+ heun_drift)
-        diffusion_corrector = 0.5f0 * (diffusion_term(t_diffusion, x, pars, ps, st) .+ diffusion_term(t_diffusion .+ dt, predictor, pars, ps, st))
+        diffusion_corrector = 0.5f0 * (diffusion_term(t, x, pars, ps, st) .+ diffusion_term(t .+ dt, predictor, pars, ps, st))
 
         x = x .+ drift_corrector .* dt + diffusion_corrector .* dW
 
@@ -302,10 +305,12 @@ function SDE_runge_kutta(
 
     for i = 1:(num_steps-1)
 
-        t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
-        t_diffusion = repeat(t_drift, size(x)[1:3]...)   
+        # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
+        t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
+        t_diffusion = timestep[i]#repeat(t_drift, size(x)[1:3]...)   
 
-        z = randn(rng, size(x)) |> dev
+        # z = randn(rng, size(x)) |> dev
+        z = randn!(rng, similar(x, size(x)))
         dW = sqrt(dt) .* z
 
         X0 = x
@@ -358,13 +363,14 @@ function forecasting_sde_sampler(
     x = x_0
 
     # Initial step
-    z = randn(rng, size(x_0)) |> dev
+    z = randn!(rng, similar(x, size(x)))
     dW = sqrt(dt) .* z
-    t = timesteps[1] .* ones(1, 1, 1, size(x_0)[end]) |> dev
+
+    t = timesteps[1:1]  |> dev # .* ones(1, 1, 1, size(x_0)[end]) |> dev
 
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 
-    t = repeat(t, size(x_0)[1:3]...)
+    # t = timesteps[1] |> dev #repeat(t, size(x_0)[1:3]...) |> dev
     x = x + vel_t .* dt .+ model.gamma(t) .* dW
 
     # Remaining steps
@@ -411,7 +417,7 @@ function ODE_runge_kutta(
 
     for i = 1:(num_steps-1)
 
-        t_drift = timesteps[i] .* ones(Float32, 1) |> dev
+        t_drift = fill!(similar(x, 1), timesteps[i])
 
         X0 = x
         t0_drift = t_drift
@@ -438,6 +444,37 @@ function ODE_runge_kutta(
     return x
 end
 
+function ODE_heun(
+    drift_term::Function,
+    x::AbstractArray,
+    pars::AbstractArray,
+    timesteps::AbstractArray,
+    ps::NamedTuple,
+    st::NamedTuple,
+    dev=gpu_device()
+)
+
+    num_steps = length(timesteps)
+    dt = Float32(timesteps[2] - timesteps[1]) |> dev
+
+    for i = 1:(num_steps-1)
+
+        t_drift = fill!(similar(x, 1), timesteps[i])
+
+        F1, st = drift_term(t_drift, x, pars, ps, st)        
+        X1 = x .+ F1 .* dt
+
+        t1_drift = t_drift .+ dt
+        F2, st = drift_term(t1_drift, X1, pars, ps, st)
+
+        x = x .+ 0.5f0 .* (F1 .+ F2) .* dt
+
+    end
+
+    return x
+end
+
+
 function forecasting_ode_sampler(
     x_0::AbstractArray,
     pars::AbstractArray,
@@ -453,9 +490,11 @@ function forecasting_ode_sampler(
 
     x_0 = x_0 |> dev
 
-    drift_term(t, x, pars, ps, st) = model.velocity((x, x_0, pars, t), ps, st)
+    # drift_term(t, x, pars, ps, st) = model.drift_term((x, x_0, pars, t), ps, st)
 
-    x = ODE_runge_kutta(
+    drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
+    # x = ODE_runge_kutta(
+    x = ODE_heun(
         drift_term,
         x_0,
         pars,

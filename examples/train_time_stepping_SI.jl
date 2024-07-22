@@ -1,3 +1,7 @@
+ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "20GiB"
+ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
+
+
 using StochasticInterpolants
 using Lux
 using Random
@@ -17,6 +21,7 @@ using LinearAlgebra
 using NPZ
 using JSON
 using YAML
+
 
 # Set the seed
 rng = Random.default_rng();
@@ -75,7 +80,6 @@ testset, testset_pars = load_transonic_cylinder_flow_data(
     time_step_info=(test_start_time, test_num_steps, test_skip_steps)
 );
 
-
 # Normalize the data
 normalize_data = NormalizeData(
     test_case_config["norm_mean"], 
@@ -84,17 +88,30 @@ normalize_data = NormalizeData(
 trainset = normalize_data.transform(trainset);
 testset = normalize_data.transform(testset);
 
+# Create a gif
 x1, p1 = trainset[:, :, 4, :, 1], trainset_pars[1, 1, 1];
 x2, p2 = trainset[:, :, 4, :, 2], trainset_pars[1, 1, 2];
 x3, p3 = trainset[:, :, 4, :, 3], trainset_pars[1, 1, 3];
-# x4, p4 = trainset[:, :, 4, :, 32], trainset_pars[1, 1, 32];
-create_gif((x1, x2, x3), "HF.gif", ("Ma = $p1", "Ma = $p2", "Ma = $p3"))
-# create_gif((x1, x2, x3, x4), "HF.gif", ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4"))
+x4, p4 = trainset[:, :, 4, :, 4], trainset_pars[1, 1, 4];
+x5, p5 = trainset[:, :, 4, :, 5], trainset_pars[1, 1, 5];
+x6, p6 = trainset[:, :, 4, :, 6], trainset_pars[1, 1, 6];
+x7, p7 = trainset[:, :, 4, :, 7], trainset_pars[1, 1, 7];
+x8, p8 = trainset[:, :, 4, :, 8], trainset_pars[1, 1, 8];
+
+create_gif(
+    (x1, x2, x3-x3, x4, x5, x6, x7, x8), 
+    "HF.gif", 
+    ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+)
+
+# create_gif((x1, x2, x3), "HF.gif", ("Ma = $p1", "Ma = $p2", "Ma = $p3"))
+
 
 # Divide the training set into initial and target distributions
 trainset_init_distribution = trainset[:, :, :, 1:end-1, :];
 trainset_target_distribution = trainset[:, :, :, 2:end, :];
 trainset_pars = trainset_pars[:, 1:end-1, :];
+
 
 trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, (num_steps-1)*num_train);
 trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-1)*num_train);
@@ -102,6 +119,7 @@ trainset_pars_distribution = reshape(trainset_pars, num_pars, (num_steps-1)*num_
 
 
 ##### Hyperparameters #####
+
 embedding_dims = 128;
 batch_size = 8;
 learning_rate = 5e-4;
@@ -117,9 +135,9 @@ model = ForecastingStochasticInterpolant(
     embedding_dims=embedding_dims, 
     block_depth=2,
     num_steps=num_steps,
-    diffusion_multiplier=1.0f0,
+    diffusion_multiplier=0.5f0,
     dev=dev
-)
+);
 ps, st = Lux.setup(rng, model) .|> dev;
 
 model_save_dir = "trained_models/forecasting_model";
@@ -128,12 +146,12 @@ model_save_dir = "trained_models/forecasting_model";
 opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
-continue_training = false;
-continue_epoch = 0;
+continue_training = true;
+continue_epoch = 2750;
 ##### Load checkpoint #####
 if continue_training
-    ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson");
-end
+    ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
+end;
 ##### Train stochastic interpolant #####
 ps, st = train_stochastic_interpolant(
     model=model,
@@ -154,6 +172,35 @@ ps, st = train_stochastic_interpolant(
 )
 
 
+# test_init_condition = testset[:, :, :, 1, 1:1] |> dev;
+# test_pars = testset_pars[:, 1:1, 1] |> dev;
+# num_test_steps = size(testset, 4) |> dev;
+# num_test_paths = 5 |> dev;
+
+# x = compute_multiple_ODE_steps(
+#     init_condition=test_init_condition,
+#     parameters=test_pars,
+#     num_physical_steps=num_test_steps,
+#     num_generator_steps=25,
+#     model=model,
+#     ps=ps,
+#     st=st,
+#     dev=dev
+# )
+
+
+# x = compute_multiple_SDE_steps(
+#     init_condition=test_init_condition,
+#     parameters=test_pars,
+#     num_physical_steps=num_test_steps,
+#     num_generator_steps=25,
+#     num_paths=num_test_paths,
+#     model=model,
+#     ps=ps,
+#     st=st,
+#     rng=rng,
+#     dev=dev
+# )
 
 
 # x = trainset_init_distribution[:, :, :, 1:4] |> dev;
