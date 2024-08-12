@@ -38,7 +38,10 @@ export DiffusionTransformer
 export ConditionalDiffusionTransformer
 export ConvNextUNet
 export parameter_diffusion_transformer_block
-export ParsConvNextUNet
+# export ParsConvNextUNet
+export SpatialAttention
+export DitParsConvNextUNet
+export AttnParsConvNextUNet
 
 
 include("unet_transformer.jl")
@@ -91,6 +94,7 @@ include("plotting_utils.jl")
 include("checkpoint_utils.jl")
 include("data_utils.jl")
 include("preprocessing_utils.jl")
+include("tseting_utils.jl")
 
 # Plotting
 export create_gif
@@ -103,7 +107,11 @@ export load_checkpoint
 export load_transonic_cylinder_flow_data
 
 # Preprocessing
-export NormalizeData
+export StandardizeData
+export NormalizePars
+
+# Testing
+export test_SI_time_stepping
 
 
 ##### Training #####

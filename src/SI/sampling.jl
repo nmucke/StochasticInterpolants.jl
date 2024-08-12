@@ -266,8 +266,8 @@ function SDE_heun(
         t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
         # t_diffusion = t_drift#timesteps[i:i]#repeat(t_drift, size(x)[1:3]...)   
 
-        z = randn(rng, size(x)) |> dev
-        # z = randn!(rng, similar(x, size(x)))
+        # z = randn(rng, size(x)) |> dev
+        z = randn!(rng, similar(x, size(x)))
         dW = sqrt(dt) .* z
         
         # Predictor from Euler step
@@ -366,7 +366,7 @@ function forecasting_sde_sampler(
     z = randn!(rng, similar(x, size(x)))
     dW = sqrt(dt) .* z
 
-    t = timesteps[1:1]  |> dev # .* ones(1, 1, 1, size(x_0)[end]) |> dev
+    t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1])  |> dev 
 
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 
@@ -390,7 +390,9 @@ function forecasting_sde_sampler(
     )
 
     # Final step
-    z = randn(rng, size(x_0)) |> dev
+    # z = randn(rng, size(x_0)) |> dev
+    z = randn!(rng, similar(x_0, size(x_0)))
+    
     t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 

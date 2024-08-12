@@ -18,9 +18,15 @@ function compute_multiple_SDE_steps(;
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
-    dev=gpu_device()
+    dev=gpu_device(),
+    mask=nothing,
 )
     cpu_dev = LuxCPUDevice()
+
+    if !isnothing(mask)
+        mask = mask |> dev 
+    end
+    
     
     sol = zeros(size(init_condition)[1:3]..., num_physical_steps, num_paths)
 
@@ -30,6 +36,10 @@ function compute_multiple_SDE_steps(;
 
     x_n = sol[:, :, :, 1, :] |> dev
     for i in ProgressBar(1:(num_physical_steps - 1))
+
+        if !isnothing(mask)
+            x_n = x_n .* mask
+        end
         
         x_n = forecasting_sde_sampler(x_n, pars, model, ps, st, num_generator_steps, rng, dev)
         
@@ -56,9 +66,14 @@ function compute_multiple_ODE_steps(;
     model::ForecastingStochasticInterpolant,
     ps::NamedTuple,
     st::NamedTuple,
-    dev=gpu_device()
+    dev=gpu_device(),
+    mask=nothing,
 )
     cpu_dev = LuxCPUDevice()
+    
+    if !isnothing(mask)
+        mask = mask |> dev 
+    end
     
     sol = zeros(size(init_condition)[1:3]..., num_physical_steps, 1)
 
@@ -68,6 +83,10 @@ function compute_multiple_ODE_steps(;
 
     x_n = sol[:, :, :, 1, :] |> dev
     for i in ProgressBar(1:(num_physical_steps - 1))
+
+        if !isnothing(mask)
+            x_n = x_n .* mask
+        end
 
         x_n = forecasting_ode_sampler(x_n, parameters, model, ps, st, num_generator_steps, dev)
         

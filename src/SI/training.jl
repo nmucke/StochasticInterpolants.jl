@@ -48,18 +48,17 @@ function train_stochastic_interpolant(;
     model_save_dir::String=nothing,
     num_epochs::Int=1000,
     batch_size::Int=8,
+    normalize_data=nothing,
+    mask=nothing,
     rng::AbstractRNG,
     dev=gpu_device()
 )
 
     output_sde = true
-    output_ode = true
+    output_ode = false
 
     num_steps = size(testset, 4)
 
-    test_init_condition = testset[:, :, :, 1, 1:1]
-    test_pars = testset_pars[:, 1:1, 1]
-    num_test_steps = size(testset, 4)
 
     cpu_dev = LuxCPUDevice();
 
@@ -105,11 +104,12 @@ function train_stochastic_interpolant(;
         
         running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
         
-        if epoch % 1 == 0
+        if epoch % 5 == 0
             print("Loss Value after $epoch iterations: $running_loss \n")
         end
 
-        if epoch % 1 == 0
+
+        if epoch % 25 == 0
 
             CUDA.reclaim()
             GC.gc()
@@ -117,51 +117,92 @@ function train_stochastic_interpolant(;
             st_ = Lux.testmode(st)
 
 
-            if false #output_sde
+            if output_sde
 
-                x = compute_multiple_SDE_steps(
-                    init_condition=test_init_condition,
-                    parameters=test_pars,
-                    num_physical_steps=num_test_steps,
-                    num_generator_steps=25,
-                    num_paths=num_test_paths,
-                    model=model,
-                    ps=ps,
-                    st=st_,
-                    rng=rng,
-                    dev=dev
-                )
-
-                # println("Time stepping error (SDE): ", mean(error))
-
-                MSE = 0.0f0
-                for i = 1:num_test_paths
-                    MSE += mean((x[:, :, 4, :, i] - testset[:, :, 4, :, 1]).^2)
+                num_test_trajectories = size(testset)[end]
+                num_channels = size(testset, 3)
+                num_test_steps = size(testset, 4)
+                
+                if !isnothing(normalize_data)
+                    x_true = normalize_data.inverse_transform(testset)
+                else
+                    x_true = testset
                 end
 
-                MSE /= num_test_paths
-                println("MSE over paths (SDE): ", MSE)
+                if !isnothing(mask)
+                    x_true = x_true .* mask
+                    num_non_obstacle_grid_points = sum(mask)
+                else
+                    num_non_obstacle_grid_points = size(x_true)[1] * size(x_true)[2]
+                end
+                
+                pathwise_MSE = []
+                mean_MSE = []
+                x = zeros(size(testset)...);
+                for i = 1:num_test_trajectories
 
-                x = x[:, :, 4, :, :]
-                x_true = testset[:, :, 4, :, 1]
+                    test_init_condition = testset[:, :, :, 1:1, i]
+                    test_pars = testset_pars[:, 1:1, i]
 
-                x_mean = mean(x, dims=4)[:, :, :, 1]
-                x_std = std(x, dims=4)[:, :, :, 1]
+                    x = compute_multiple_SDE_steps(
+                        init_condition=test_init_condition,
+                        parameters=test_pars,
+                        num_physical_steps=num_test_steps,
+                        num_generator_steps=15,
+                        num_paths=num_test_paths,
+                        model=model,
+                        ps=ps,
+                        st=st_,
+                        rng=rng,
+                        dev=dev,
+                        mask=mask,
+                    )
+                
+                
+                    if !isnothing(normalize_data)
+                        x = normalize_data.inverse_transform(x)
+                    end
 
-                MSE = mean((x_mean - x_true).^2)
-                println("MSE over mean (SDE): ", MSE)
+                    if !isnothing(mask)
+                        x = x .* mask
+                    end
+
+                    error_i = 0
+                    for j = 1:num_test_paths
+                        error_i += sum((x[:, :, :, :, j] - x_true[:, :, :, :, i]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+                    end
+                    error_i = error_i / num_test_paths
+
+                    push!(pathwise_MSE, error_i)
+
+                    x_mean = mean(x, dims=5)[:, :, :, :, 1]
+                    x_std = std(x, dims=5)[:, :, :, :, 1]
+
+                    MSE = sum((x_mean - x_true[:, :, :, :, i]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+                    push!(mean_MSE, MSE)
+                end
+
+                println("Mean of pathwise MSE: ", mean(pathwise_MSE))
+                println("Std of pathwise MSE: ", std(pathwise_MSE))
+
+                println("Mean of mean MSE (SDE): ", mean(mean_MSE))
+                println("Std of mean MSE (SDE): ", std(mean_MSE))
+
+                
+                x_mean = mean(x, dims=5)[:, :, :, :, 1]
+                x_std = std(x, dims=5)[:, :, :, :, 1]
+
+                x_true = x_true[:, :, :, :, num_test_trajectories]
 
                 save_path = @sprintf("output/sde_SI_%i.gif", epoch)
 
-                preds_to_save = (x_true, x_mean, Float16.(x_mean-x_true), Float16.(x_std), x[:, :, :, 1], x[:, :, :, 2], x[:, :, :, 3], x[:, :, :, 4])
+                preds_to_save = (x_true[:, :, 4, :], x_mean[:, :, 4, :], Float16.(x_mean[:, :, 4, :]-x_true[:, :, 4, :]), Float16.(x_std[:, :, 4, :]), x[:, :, 4, :, 1], x[:, :, 4, :, 2], x[:, :, 4, :, 3], x[:, :, 4, :, 4])
                 create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
 
                 CUDA.reclaim()
                 GC.gc()
 
-
-
-                if !isnothing(model_save_dir) && MSE < best_loss
+                if !isnothing(model_save_dir) && mean(pathwise_MSE) < best_loss
                     save_checkpoint(
                         ps=ps, 
                         st=st,
@@ -170,8 +211,11 @@ function train_stochastic_interpolant(;
                         epoch=epoch
                     )
 
-                    best_loss = MSE
+                    best_loss = mean(pathwise_MSE)
                 end
+
+
+            
             
             end
 
@@ -187,27 +231,43 @@ function train_stochastic_interpolant(;
                     model=model,
                     ps=ps,
                     st=st_,
-                    dev=dev
+                    dev=dev,
+                    mask=mask,
                 )
 
-                MSE = mean((x[:, :, 4, :] - testset[:, :, 4, :, 1]).^2)
+                num_channels = size(x, 3)
+                
+                if !isnothing(normalize_data)
+                    x = normalize_data.inverse_transform(x)
+                    x_true = normalize_data.inverse_transform(testset)
+                end
+                
+                if !isnothing(mask)
+                    x = x .* mask
+                    x_true = x_true .* mask
+                
+                    num_non_obstacle_grid_points = sum(mask)
+                end
+                
+                MSE = sum((x[:, :, :, :, 1] - x_true[:, :, :, :, 1]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
                 println("MSE (ODE): ", MSE)
-
+                
                 # println("Time stepping error (ODE): ", mean(error))
-
-                x = x[:, :, 4, :]
-                x_true = testset[:, :, 4, :, 1]
-
-
+                
+                x = x[:, :, 4, :, 1]
+                x_true = x_true[:, :, 4, :, 1]
+                
+                
                 save_path = @sprintf("output/ode_SI_%i.gif", epoch)
-
+                
                 preds_to_save = (x_true, x, x-x_true)
                 create_gif(preds_to_save, save_path, ["True", "Pred", "Error"])
-
+                
                 CUDA.reclaim()
                 GC.gc()
+
             end
-            
+
 
         end
 

@@ -93,7 +93,7 @@ function ForecastingStochasticInterpolant(
     #     max_freq=max_freq, 
     #     embedding_dims=embedding_dims
     # )
-    velocity = ParsConvNextUNet(
+    velocity = DitParsConvNextUNet(
         image_size; 
         in_channels=in_channels,
         channels=channels, 
@@ -103,6 +103,19 @@ function ForecastingStochasticInterpolant(
         embedding_dims=embedding_dims,
         pars_dim=1
     )
+    # velocity = AttnParsConvNextUNet(
+    #     image_size; 
+    #     in_channels=in_channels,
+    #     channels=channels, 
+    #     block_depth=block_depth,
+    #     min_freq=min_freq, 
+    #     max_freq=max_freq, 
+    #     embedding_dims=embedding_dims,
+    #     pars_dim=1
+    # )
+
+
+    
 
 
     # velocity = ConditionalDiffusionTransformer(

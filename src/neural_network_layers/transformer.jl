@@ -86,6 +86,54 @@ function unpatchify(x, imsize, patch_size, out_channels)
 end
 
 
+
+function SpatialAttention(;
+    imsize,
+    in_channels,
+    embed_dim,
+    num_heads=1,
+    dropout_rate=0.1f0,
+)
+    @compact(
+        # norm = Lux.LayerNorm((in_channels, 1); affine=true),
+        norm = Lux.InstanceNorm(in_channels),
+        _patchify = patchify(
+            imsize; 
+            in_channels=in_channels, 
+            patch_size=(1, 1), 
+            embed_planes=embed_dim
+        ),
+        attn = MultiHeadAttention(
+            embed_dim, 
+            num_heads; 
+            attention_dropout_rate=dropout_rate,
+            projection_dropout_rate=dropout_rate
+        ),
+        conv_out = Lux.Chain(
+            Lux.Conv((1, 1), embed_dim => in_channels),
+            Lux.InstanceNorm(in_channels),
+            # Lux.LayerNorm((in_channels, 1); affine=true),
+        )
+
+        
+    ) do x
+        x_in = x
+        x = norm(x)
+        x = _patchify(x)
+        x = attn(x)
+        x = unpatchify(x, imsize, (1, 1), embed_dim)
+        x = conv_out(x)
+        return x + x_in
+    end
+end
+
+
+
+
+
+
+
+
 """
     VisionTransformerEncoder(in_planes, depth, number_heads; mlp_ratio = 4.0f0,
         dropout = 0.0f0)

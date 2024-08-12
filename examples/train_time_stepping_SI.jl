@@ -22,7 +22,6 @@ using NPZ
 using JSON
 using YAML
 
-
 # Set the seed
 rng = Random.default_rng();
 Random.seed!(rng, 0);
@@ -35,8 +34,8 @@ cpu_dev = LuxCPUDevice();
 test_case = "transonic_cylinder_flow";
 
 # Which type of testing to perform
-# options are pars_extrapolation, pars_interpolation, long_rollouts
-test_args = "pars_interpolation";
+# options are "pars_extrapolation", "pars_interpolation", "long_rollouts"
+test_args = "long_rollouts";
 
 # Load the test case configuration
 test_case_config = YAML.load_file("configs/test_cases/$test_case.yml");
@@ -49,6 +48,15 @@ H = test_case_config["state_dimensions"]["height"];
 W = test_case_config["state_dimensions"]["width"];
 C = test_case_config["state_dimensions"]["channels"];
 num_pars = length(test_case_config["parameter_dimensions"]);
+
+# Load mask if it exists
+if test_case_config["with_mask"]
+    mask = npzread("$data_folder/sim_000000/obstacle_mask.npz")["arr_0"];
+    mask = permutedims(mask, (2, 1)) |> dev;
+else
+    mask = ones(H, W, C) |> dev;
+end;
+
 
 # Number of training samples
 num_train = length(test_case_config["training_args"]["ids"]);
@@ -81,28 +89,42 @@ testset, testset_pars = load_transonic_cylinder_flow_data(
 );
 
 # Normalize the data
-normalize_data = NormalizeData(
+
+normalize_data = StandardizeData(
     test_case_config["norm_mean"], 
-    test_case_config["norm_std"]
+    test_case_config["norm_std"],
 );
 trainset = normalize_data.transform(trainset);
 testset = normalize_data.transform(testset);
 
-# Create a gif
-x1, p1 = trainset[:, :, 4, :, 1], trainset_pars[1, 1, 1];
-x2, p2 = trainset[:, :, 4, :, 2], trainset_pars[1, 1, 2];
-x3, p3 = trainset[:, :, 4, :, 3], trainset_pars[1, 1, 3];
-x4, p4 = trainset[:, :, 4, :, 4], trainset_pars[1, 1, 4];
-x5, p5 = trainset[:, :, 4, :, 5], trainset_pars[1, 1, 5];
-x6, p6 = trainset[:, :, 4, :, 6], trainset_pars[1, 1, 6];
-x7, p7 = trainset[:, :, 4, :, 7], trainset_pars[1, 1, 7];
-x8, p8 = trainset[:, :, 4, :, 8], trainset_pars[1, 1, 8];
+# Normalize the parameters
+normalize_pars = NormalizePars(
+    test_case_config["pars_min"], 
+    test_case_config["pars_max"]
+);
+trainset_pars = normalize_pars.transform(trainset_pars);
+testset_pars = normalize_pars.transform(testset_pars);
 
-create_gif(
-    (x1, x2, x3-x3, x4, x5, x6, x7, x8), 
-    "HF.gif", 
-    ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
-)
+# Apply mask
+mask = mask |> cpu_dev;
+trainset = trainset .* mask;
+testset = testset .* mask;
+
+# # Create a gif
+# x1, p1 = trainset[:, :, 4, :, 1], trainset_pars[1, 1, 1];
+# x2, p2 = trainset[:, :, 4, :, 2], trainset_pars[1, 1, 2];
+# x3, p3 = trainset[:, :, 4, :, 3], trainset_pars[1, 1, 3];
+# x4, p4 = trainset[:, :, 4, :, 4], trainset_pars[1, 1, 4];
+# x5, p5 = trainset[:, :, 4, :, 5], trainset_pars[1, 1, 5];
+# x6, p6 = trainset[:, :, 4, :, 6], trainset_pars[1, 1, 6];
+# x7, p7 = trainset[:, :, 4, :, 7], trainset_pars[1, 1, 7];
+# x8, p8 = trainset[:, :, 4, :, 8], trainset_pars[1, 1, 8];
+
+# create_gif(
+#     (x1, x2, x3, x4, x5, x6, x7, x8), 
+#     "HF.gif", 
+#     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+# )
 
 # create_gif((x1, x2, x3), "HF.gif", ("Ma = $p1", "Ma = $p2", "Ma = $p3"))
 
@@ -120,10 +142,10 @@ trainset_pars_distribution = reshape(trainset_pars, num_pars, (num_steps-1)*num_
 
 ##### Hyperparameters #####
 
-embedding_dims = 128;
+embedding_dims = 256;
 batch_size = 8;
 learning_rate = 5e-4;
-weight_decay = 1e-6;
+weight_decay = 1e-8;
 num_epochs = 200000;
 num_samples = 9;
 
@@ -135,7 +157,7 @@ model = ForecastingStochasticInterpolant(
     embedding_dims=embedding_dims, 
     block_depth=2,
     num_steps=num_steps,
-    diffusion_multiplier=0.5f0,
+    diffusion_multiplier=0.1f0,
     dev=dev
 );
 ps, st = Lux.setup(rng, model) .|> dev;
@@ -146,8 +168,8 @@ model_save_dir = "trained_models/forecasting_model";
 opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
-continue_training = true;
-continue_epoch = 2750;
+continue_training = false;
+continue_epoch = 225;
 ##### Load checkpoint #####
 if continue_training
     ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
@@ -167,15 +189,104 @@ ps, st = train_stochastic_interpolant(
     model_save_dir=model_save_dir,
     num_epochs=num_epochs,
     batch_size=batch_size,
+    normalize_data=normalize_data,
+    mask=mask,
     rng=rng,
     dev=dev
 )
 
 
-# test_init_condition = testset[:, :, :, 1, 1:1] |> dev;
-# test_pars = testset_pars[:, 1:1, 1] |> dev;
+# test_init_condition = testset[:, :, :, 1:1, 1:1] |> dev;
+# test_pars = testset_pars[:, 1:1, :] |> dev;
 # num_test_steps = size(testset, 4) |> dev;
-# num_test_paths = 5 |> dev;
+num_test_paths = 5 |> dev;
+
+
+num_test_trajectories = size(testset)[end];
+num_channels = size(testset, 3);
+num_test_steps = size(testset, 4);
+
+st_ = Lux.testmode(st);
+
+if !isnothing(normalize_data)
+    x_true = normalize_data.inverse_transform(testset)
+else
+    x_true = testset
+end;
+
+if !isnothing(mask)
+    x_true = x_true .* mask
+    num_non_obstacle_grid_points = sum(mask)
+else
+    num_non_obstacle_grid_points = size(x_true)[1] * size(x_true)[2]
+end;
+
+pathwise_MSE = []
+mean_MSE = []
+x = zeros(H, W, C, num_test_steps, num_test_paths) |> dev;
+for i = 1:num_test_trajectories
+
+    test_init_condition = testset[:, :, :, 1:1, i]
+    test_pars = testset_pars[:, 1:1, i]
+
+    x = compute_multiple_SDE_steps(
+        init_condition=test_init_condition,
+        parameters=test_pars,
+        num_physical_steps=num_test_steps,
+        num_generator_steps=40,
+        num_paths=num_test_paths,
+        model=model,
+        ps=ps,
+        st=st_,
+        rng=rng,
+        dev=dev,
+        mask=mask,
+    )
+
+
+    if !isnothing(normalize_data)
+        x = normalize_data.inverse_transform(x)
+    end
+
+    if !isnothing(mask)
+        x = x .* mask
+    end
+
+    error_i = 0
+    for j = 1:num_test_paths
+        error_i += sum((x[:, :, :, :, j] - x_true[:, :, :, :, i]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+    end
+    error_i = error_i / num_test_paths
+
+    push!(pathwise_MSE, error_i)
+
+    x_mean = mean(x, dims=5)[:, :, :, :, 1]
+    x_std = std(x, dims=5)[:, :, :, :, 1]
+
+    MSE = sum((x_mean - x_true[:, :, :, :, i]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+    push!(mean_MSE, MSE)
+end;
+
+println("Mean of pathwise MSE: ", mean(pathwise_MSE))
+println("Std of pathwise MSE: ", std(pathwise_MSE))
+
+println("Mean of mean MSE (SDE): ", mean(mean_MSE))
+println("Std of mean MSE (SDE): ", std(mean_MSE))
+
+x_mean = mean(x, dims=5)[:, :, :, :, 1];
+x_std = std(x, dims=5)[:, :, :, :, 1];
+
+x_true = x_true[:, :, :, :, num_test_trajectories];
+
+save_path = @sprintf("output/tra_long_sde_SI_test.gif")
+
+preds_to_save = (x_true[:, :, 4, :], x_mean[:, :, 4, :], Float16.(x_mean[:, :, 4, :]-x_true[:, :, 4, :]), Float16.(x_std[:, :, 4, :]), x[:, :, 4, :, 1], x[:, :, 4, :, 2], x[:, :, 4, :, 3], x[:, :, 4, :, 4]);
+create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
+
+CUDA.reclaim()
+    GC.gc()
+
+
 
 # x = compute_multiple_ODE_steps(
 #     init_condition=test_init_condition,
@@ -185,8 +296,38 @@ ps, st = train_stochastic_interpolant(
 #     model=model,
 #     ps=ps,
 #     st=st,
-#     dev=dev
-# )
+#     dev=dev,
+#     mask=mask
+# );
+
+# num_channels = size(x, 3)
+
+# if !isnothing(normalize_data)
+#     x = normalize_data.inverse_transform(x)
+#     testset = normalize_data.inverse_transform(testset)
+# end
+
+# if !isnothing(mask)
+#     x = x .* mask
+#     testset = testset .* mask
+
+#     num_non_obstacle_grid_points = sum(mask)
+# end
+
+# MSE = sum((x[:, :, :, :, 1] - testset[:, :, :, :, 1]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+# println("MSE (ODE): ", MSE)
+
+# # println("Time stepping error (ODE): ", mean(error))
+
+# x = x[:, :, 4, :, 1]
+# x_true = testset[:, :, 4, :, 1]
+
+
+# save_path = @sprintf("output/ode_SI_%i.gif", 1)
+
+# preds_to_save = (x_true, x, x-x_true)
+# create_gif(preds_to_save, save_path, ["True", "Pred", "Error"])
+
 
 
 # x = compute_multiple_SDE_steps(
@@ -199,8 +340,46 @@ ps, st = train_stochastic_interpolant(
 #     ps=ps,
 #     st=st,
 #     rng=rng,
-#     dev=dev
-# )
+#     dev=dev,
+#     mask=mask
+# );
+
+
+# num_channels = size(x, 3)
+                
+# if !isnothing(normalize_data)
+#     x = normalize_data.inverse_transform(x)
+#     testset = normalize_data.inverse_transform(testset)
+# end
+
+# if !isnothing(mask)
+#     x = x .* mask
+#     testset = testset .* mask
+
+#     num_non_obstacle_grid_points = sum(mask)
+# end
+
+# MSE = 0.0f0
+# for i = 1:num_test_paths
+#     MSE += sum((x[:, :, :, :, i] - testset[:, :, :, :, 1]).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+# end
+
+# MSE /= num_test_paths
+# println("MSE over paths (SDE): ", MSE)
+
+# x_true = testset[:, :, :, :, 1]
+
+# x_mean = mean(x, dims=5)[:, :, :, :, 1]
+# x_std = std(x, dims=5)[:, :, :, :, 1]
+
+# MSE = sum((x_mean - x_true).^2) / num_non_obstacle_grid_points / num_test_steps / num_channels
+# println("MSE over mean (SDE): ", MSE)
+
+# save_path = @sprintf("output/sde_SI_%i.gif", 1)
+
+# preds_to_save = (x_true[:, :, 4, :], x_mean[:, :, 4, :], Float16.(x_mean[:, :, 4, :]-x_true[:, :, 4, :]), Float16.(x_std[:, :, 4, :]), x[:, :, 4, :, 1], x[:, :, 4, :, 2], x[:, :, 4, :, 3], x[:, :, 4, :, 4])
+# create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
+
 
 
 # x = trainset_init_distribution[:, :, :, 1:4] |> dev;
