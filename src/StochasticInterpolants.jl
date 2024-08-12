@@ -94,7 +94,7 @@ include("plotting_utils.jl")
 include("checkpoint_utils.jl")
 include("data_utils.jl")
 include("preprocessing_utils.jl")
-include("tseting_utils.jl")
+include("testing_utils.jl")
 
 # Plotting
 export create_gif

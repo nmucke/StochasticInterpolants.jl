@@ -93,17 +93,7 @@ function ForecastingStochasticInterpolant(
     #     max_freq=max_freq, 
     #     embedding_dims=embedding_dims
     # )
-    velocity = DitParsConvNextUNet(
-        image_size; 
-        in_channels=in_channels,
-        channels=channels, 
-        block_depth=block_depth,
-        min_freq=min_freq, 
-        max_freq=max_freq, 
-        embedding_dims=embedding_dims,
-        pars_dim=1
-    )
-    # velocity = AttnParsConvNextUNet(
+    # velocity = DitParsConvNextUNet(
     #     image_size; 
     #     in_channels=in_channels,
     #     channels=channels, 
@@ -113,10 +103,16 @@ function ForecastingStochasticInterpolant(
     #     embedding_dims=embedding_dims,
     #     pars_dim=1
     # )
-
-
-    
-
+    velocity = AttnParsConvNextUNet(
+        image_size; 
+        in_channels=in_channels,
+        channels=channels, 
+        block_depth=block_depth,
+        min_freq=min_freq, 
+        max_freq=max_freq, 
+        embedding_dims=embedding_dims,
+        pars_dim=1
+    )
 
     # velocity = ConditionalDiffusionTransformer(
     #     image_size;
@@ -154,14 +150,6 @@ function ForecastingStochasticInterpolant(
 
         vel_t, st = velocity((x, x_0, pars, t), ps, st)
 
-
-        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
-        A = 1 ./ A;
-
-        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
-
-        score = A .* (beta(t) .* vel_t .- c)
-
         if ode_mode
 
             # score = 0.5f0 .* score
@@ -170,6 +158,14 @@ function ForecastingStochasticInterpolant(
             
             return out , st
         end
+
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
+
+        score = A .* (beta(t) .* vel_t .- c)
+
 
         return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
     end

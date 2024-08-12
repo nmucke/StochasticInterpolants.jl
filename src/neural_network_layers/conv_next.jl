@@ -985,15 +985,11 @@ function AttnParsConvNextUNet(
     min_freq=1.0f0, 
     max_freq=1000.0f0, 
     embedding_dims=32,
-    pars_dim=32
+    pars_dim=32,
+    len_history=1
 )
-
+    
     multiplier = 2
-
-    init_channels = div(channels[1], 2)
-
-    conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
-    init_conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
 
     pars_embedding = Chain(
         Lux.Dense(pars_dim => pars_dim),
@@ -1002,7 +998,15 @@ function AttnParsConvNextUNet(
     )
     pars_upsample = Upsample(:nearest; size=image_size)
 
-    channels[1] = channels[1] + pars_dim
+
+    # init_channels = div(channels[1], 2)
+    init_channels = in_channels + in_channels * len_history + pars_dim
+
+
+    conv_in = Conv((7, 7), (init_channels => channels[1]); pad=3)
+    init_conv_in = Conv((7, 7), (len_history*in_channels => init_channels); pad=3)
+
+    # channels[1] = channels[1] + pars_dim
 
 
     t_embedding = Chain(
@@ -1181,12 +1185,16 @@ function (conv_next_unet::AttnParsConvNextUNet)(
     pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
     @set! st.pars_upsample = new_st
 
+    x = cat(x, x_0, pars; dims=3)
+
+
+
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
     @set! st.conv_in = new_st
-    x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
-    @set! st.init_conv_in = new_st
+    # x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
+    # @set! st.init_conv_in = new_st
 
-    x = cat(x, x_0, pars; dims=3)
+    # x = cat(x, x_0, pars; dims=3)
     skips = (x, )
     for i in 1:length(conv_next_unet.conv_down_blocks)
         conv_layer_name = Symbol(:layer_, i)

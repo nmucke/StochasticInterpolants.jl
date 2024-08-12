@@ -55,7 +55,7 @@ function train_stochastic_interpolant(;
 )
 
     output_sde = true
-    output_ode = false
+    output_ode = true
 
     num_steps = size(testset, 4)
 
