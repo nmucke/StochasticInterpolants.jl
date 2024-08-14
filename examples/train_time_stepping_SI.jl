@@ -150,7 +150,6 @@ num_epochs = 200000;
 num_samples = 9;
 
 ##### conditional SI model #####
-
 velocity = AttnParsConvNextUNet(
     (H, W); 
     in_channels=C, 

@@ -11,6 +11,17 @@ import Boltz.MultiHeadAttention as MultiHeadAttention
 using Lux.Experimental: @compact
 
 
+
+function state_pars_identity()
+    @compact(
+    ) do x
+        x, pars = x
+        x
+    end
+end
+
+
+
 ###############################################################################
 # Conv Next Block
 ###############################################################################
@@ -672,7 +683,9 @@ function DitParsConvNextUNet(
     min_freq=1.0f0, 
     max_freq=1000.0f0, 
     embedding_dims=32,
-    pars_dim=32
+    pars_dim=32,
+    len_history=1,
+    use_attention_in_layer=[false, false, true, true]
 )
 
     multiplier = 2
@@ -718,17 +731,22 @@ function DitParsConvNextUNet(
             )
         )
 
-        push!(dit_down_blocks, parameter_diffusion_transformer_block(
-            in_channels=channels[i + 1],
-            out_channels=channels[i + 1],
-            pars_dim=embedding_dims,
-            embed_dim=channels[i + 1],
-            number_heads=4,
-            mlp_ratio=2,
-            imsize=imsize,
-            patch_size=(1, 1),
-            number_patches=prod(div.(imsize, (1, 1)))
-        ))
+        if use_attention_in_layer[i]
+            push!(dit_down_blocks, parameter_diffusion_transformer_block(
+                in_channels=channels[i + 1],
+                out_channels=channels[i + 1],
+                pars_dim=embedding_dims,
+                embed_dim=channels[i + 1],
+                number_heads=4,
+                mlp_ratio=2,
+                imsize=imsize,
+                patch_size=(1, 1),
+                number_patches=prod(div.(imsize, (1, 1)))
+            ))
+        else
+            push!(attn_down_blocks, state_pars_identity())
+        end
+
 
         push!(down_blocks, Conv(
             (4, 4), 
@@ -816,17 +834,22 @@ function DitParsConvNextUNet(
             )
         )
 
-        push!(dit_up_blocks, parameter_diffusion_transformer_block(
-            in_channels=channels[i + 1],
-            out_channels=channels[i + 1],
-            pars_dim=embedding_dims,
-            embed_dim=channels[i + 1],
-            number_heads=4,
-            mlp_ratio=2,
-            imsize=imsize,
-            patch_size=(1, 1),
-            number_patches=prod(div.(imsize, (1, 1)))
-        ))
+
+        if use_attention_in_layer[i]
+            push!(dit_up_blocks, parameter_diffusion_transformer_block(
+                in_channels=channels[i + 1],
+                out_channels=channels[i + 1],
+                pars_dim=embedding_dims,
+                embed_dim=channels[i + 1],
+                number_heads=4,
+                mlp_ratio=2,
+                imsize=imsize,
+                patch_size=(1, 1),
+                number_patches=prod(div.(imsize, (1, 1)))
+            ))
+        else
+            push!(attn_down_blocks, state_pars_identity())
+        end
     end
 
     conv_up_blocks = Chain(conv_up_blocks...; disable_optimizations=true)
@@ -1006,7 +1029,7 @@ function AttnParsConvNextUNet(
     max_freq=1000.0f0, 
     embedding_dims=32,
     pars_dim=32,
-    len_history=1
+    len_history=1,
     use_attention_in_layer=[false, false, true, true]
 )
     

@@ -184,8 +184,6 @@ function train_stochastic_interpolant(;
                 # mean_pathwise_MSE = mean(pathwise_MSE)
                 # mean_mean_MSE = mean(mean_MSE)
 
-
-
                 mean_pathwise_MSE, mean_mean_MSE = compute_SDE_trajectories_RMSE(
                     testset_state=testset,
                     testset_pars=testset_pars,
