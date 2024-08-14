@@ -228,7 +228,8 @@ function get_forecasting_loss(
     g = gamma(t) |> dev
     dg_dt = dgamma_dt(t) |> dev
 
-    I, dI_dt = interpolant(x_0, x_1, t) .|> dev
+    I = interpolant.interpolant(x_0, x_1, t) .|> dev
+    dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
 
     I = I .+ g .* z
 
@@ -236,12 +237,54 @@ function get_forecasting_loss(
 
     pred, st = velocity((I, x_0, pars, t), ps, st)
 
-
     loss = mean((pred - R).^2)
 
-
-
     # loss = loss + mean(pred.^2 - 2 .* pred .* R)
+
+    return loss, st
+end
+
+
+function get_forecasting_loss(
+    x_0::AbstractArray, 
+    x_1::AbstractArray,
+    pars::AbstractArray,
+    g_0::Lux.AbstractExplicitLayer, 
+    g_1::Lux.AbstractExplicitLayer, 
+    g_z::Lux.AbstractExplicitLayer,
+    interpolant::Function, 
+    gamma::Function,
+    ps::NamedTuple, 
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+    batch_size = size(x_0)[end]
+
+    t = rand!(rng, similar(x_0, 1, 1, 1, batch_size))
+
+    z = randn!(rng, similar(x_0, size(x_0)))
+
+    g = gamma(t) |> dev
+
+    I = interpolant.interpolant(x_0, x_1, t) .|> dev
+
+    I = I .+ g .* z
+    
+    _g_0, st_new = g_0(I, pars, ps.g_0, st.g_0)
+    @set st.g_0 = st_new
+
+    _g_1, st_new = g_1(I, pars, ps.g_1, st.g_1)
+    @set st.g_1 = st_new
+
+    _g_z, st_new = g_z(I, pars, ps.g_z, st.g_z)
+    @set st.g_z = st_new
+    
+    loss_g_0 = mean((_g_0 .^ 2 - 2 .* x_0 .* _g_0))
+    loss_g_1 = mean((_g_1 .^ 2 - 2 .* x_1 .* _g_1))
+    loss_g_z = mean((_g_z .^ 2 - 2 .* z .* _g_z))
+
+    loss = loss_g_0 + loss_g_1 + loss_g_z
 
     return loss, st
 end

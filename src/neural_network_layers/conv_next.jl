@@ -20,6 +20,8 @@ using Lux.Experimental: @compact
         in_channels::Int, 
         out_channels::Int,
         multiplier::Int = 1,
+        pars_embed_dim::Int = 1,
+        imsize::Tuple{Int, Int} = (64, 128)
     )
 
 Create a conv next block with the given number of input and output channels. 
@@ -68,6 +70,47 @@ function conv_next_block(;
         h = h .+ pars
         h = conv_net(h)
         h .+ res_conv(x)
+    end
+end
+
+"""
+    multiple_conv_next_blocks(
+        in_channels::Int, 
+        out_channels::Int,
+        multiplier::Int = 1,
+        embedding_dims::Int = 1,
+        imsize::Tuple{Int, Int} = (64, 128)
+    )
+
+Create a chain of two conv next blocks with the given number of input and
+output channels. The first block has the same number of input and output
+"""
+function multiple_conv_next_blocks(;
+    in_channels::Int, 
+    out_channels::Int,
+    multiplier::Int = 1,
+    embedding_dims::Int = 1,
+    imsize::Tuple{Int, Int} = (64, 128)
+)
+    @compact(
+        block_1 = conv_next_block(
+            in_channels=in_channels, 
+            out_channels=out_channels, 
+            multiplier=multiplier,
+            pars_embed_dim=embedding_dims,
+            imsize=imsize
+        ),
+        block_2 = conv_next_block(
+            in_channels=in_channels, 
+            out_channels=out_channels, 
+            multiplier=multiplier,
+            pars_embed_dim=embedding_dims,
+            imsize=imsize
+        )
+    ) do x
+        x, t = x
+        x = block_1((x, t))
+        block_2((x, t))
     end
 end
 
@@ -664,26 +707,15 @@ function DitParsConvNextUNet(
     down_blocks = []
     for i in 1:(length(channels) - 1)
         imsize = div.(image_size, 2^(i - 1))
-        push!(conv_down_blocks, @compact(
-            block_1 = conv_next_block(
+        push!(
+            conv_down_blocks, 
+            multiple_conv_next_blocks(
                 in_channels=channels[i], 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(i - 1))
-            ),
-            block_2 = conv_next_block(
-                in_channels=channels[i + 1], 
-                out_channels=channels[i + 1], 
-                multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(i - 1))
+                embedding_dims=embedding_dims,
+                imsize=imsize
             )
-            ) do x
-                x, t = x
-                x = block_1((x, t))
-                block_2((x, t))
-            end
         )
 
         push!(dit_down_blocks, parameter_diffusion_transformer_block(
@@ -773,26 +805,15 @@ function DitParsConvNextUNet(
         ))
         
         imsize = div.(image_size, 2^(length(channels) - i - 1))
-        push!(conv_up_blocks, @compact(
-            block_1 = conv_next_block(
+        push!(
+            conv_up_blocks, 
+            multiple_conv_next_blocks(
                 in_channels=channels[i] * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(length(channels) - i - 1))
-            ),
-            block_2 = conv_next_block(
-                in_channels=channels[i + 1], 
-                out_channels=channels[i + 1], 
-                multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(length(channels) - i - 1))
+                embedding_dims=embedding_dims,
+                imsize=imsize
             )
-            ) do x
-                x, t = x
-                x = block_1((x, t))
-                block_2((x, t))
-            end
         )
 
         push!(dit_up_blocks, parameter_diffusion_transformer_block(
@@ -865,7 +886,6 @@ function (conv_next_unet::DitParsConvNextUNet)(
     x = cat(x, x_0; dims=3)
     skips = (x, )
     for i in 1:length(conv_next_unet.conv_down_blocks)
-
 
         conv_layer_name = Symbol(:layer_, i)
         x, new_st = conv_next_unet.conv_down_blocks[i](
@@ -975,18 +995,19 @@ struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     bottleneck_attn::Lux.AbstractExplicitLayer
     attn_up_blocks::Lux.AbstractExplicitLayer
     pars_upsample::Lux.AbstractExplicitLayer
+    len_history::Int
 end
 
 function AttnParsConvNextUNet(
     image_size::Tuple{Int, Int}; 
     in_channels::Int = 3,
     channels=[32, 64, 96, 128], 
-    block_depth=2,
     min_freq=1.0f0, 
     max_freq=1000.0f0, 
     embedding_dims=32,
     pars_dim=32,
     len_history=1
+    use_attention_in_layer=[false, false, true, true]
 )
     
     multiplier = 2
@@ -1023,35 +1044,27 @@ function AttnParsConvNextUNet(
     for i in 1:(length(channels) - 1)
         imsize = div.(image_size, 2^(i - 1))
 
-        push!(conv_down_blocks, @compact(
-            block_1 = conv_next_block(
+        push!(
+            conv_down_blocks, 
+            multiple_conv_next_blocks(
                 in_channels=channels[i], 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(i - 1))
-            ),
-            block_2 = conv_next_block(
-                in_channels=channels[i + 1], 
-                out_channels=channels[i + 1], 
-                multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(i - 1))
+                embedding_dims=embedding_dims,
+                imsize=imsize
             )
-            ) do x
-                x, t = x
-                x = block_1((x, t))
-                block_2((x, t))
-            end
         )
 
-        push!(attn_down_blocks, SpatialAttention(
-            imsize=imsize,
-            in_channels=channels[i + 1],
-            embed_dim=32*4,
-            num_heads=4,
-        ))
-
+        if use_attention_in_layer[i]
+            push!(attn_down_blocks, SpatialAttention(
+                imsize=imsize,
+                in_channels=channels[i + 1],
+                embed_dim=32*4,
+                num_heads=4,
+            ))
+        else
+            push!(attn_down_blocks, Lux.Identity())
+        end
 
         push!(down_blocks, Conv(
             (4, 4), 
@@ -1093,6 +1106,7 @@ function AttnParsConvNextUNet(
     )
 
     reverse!(channels)
+    reverse!(use_attention_in_layer)
     conv_up_blocks = []
     attn_up_blocks = []
     up_blocks = []
@@ -1106,34 +1120,27 @@ function AttnParsConvNextUNet(
         ))
         
         imsize = div.(image_size, 2^(length(channels) - i - 1))
-        push!(conv_up_blocks, @compact(
-            block_1 = conv_next_block(
+        push!(
+            conv_up_blocks, 
+            multiple_conv_next_blocks(
                 in_channels=channels[i] * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(length(channels) - i - 1))
-            ),
-            block_2 = conv_next_block(
-                in_channels=channels[i + 1], 
-                out_channels=channels[i + 1], 
-                multiplier=multiplier,
-                pars_embed_dim=embedding_dims,
-                imsize=imsize#div.(image_size, 2^(length(channels) - i - 1))
+                embedding_dims=embedding_dims,
+                imsize=imsize
             )
-            ) do x
-                x, t = x
-                x = block_1((x, t))
-                block_2((x, t))
-            end
         )
 
-        push!(attn_up_blocks, SpatialAttention(
-            imsize=imsize,
-            in_channels=channels[i + 1],
-            embed_dim=32*4,
-            num_heads=4,
-        ))
+        if use_attention_in_layer[i]
+            push!(attn_up_blocks, SpatialAttention(
+                imsize=imsize,
+                in_channels=channels[i + 1],
+                embed_dim=32*4,
+                num_heads=4,
+            ))
+        else
+            push!(attn_up_blocks, Lux.Identity())
+        end
     end
 
     conv_up_blocks = Chain(conv_up_blocks...; disable_optimizations=true)
@@ -1161,7 +1168,7 @@ function AttnParsConvNextUNet(
         conv_in, init_conv_in, conv_out, conv_down_blocks, 
         down_blocks, bottleneck1, bottleneck2, conv_up_blocks, 
         up_blocks, t_embedding, pars_embedding, attn_down_blocks,
-        bottleneck_attn, attn_up_blocks, pars_upsample
+        bottleneck_attn, attn_up_blocks, pars_upsample, len_history
     )
 end
 
@@ -1185,9 +1192,11 @@ function (conv_next_unet::AttnParsConvNextUNet)(
     pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
     @set! st.pars_upsample = new_st
 
-    x = cat(x, x_0, pars; dims=3)
-
-
+    if conv_next_unet.len_history < 1
+        x = cat(x, pars; dims=3)
+    else
+        x = cat(x, x_0, pars; dims=3)
+    end
 
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
     @set! st.conv_in = new_st
@@ -1203,10 +1212,10 @@ function (conv_next_unet::AttnParsConvNextUNet)(
         )  
         @set! st.conv_down_blocks[conv_layer_name] = new_st
 
-        # x, new_st = conv_next_unet.attn_down_blocks[i](
-        #     x, ps.attn_down_blocks[conv_layer_name], st.attn_down_blocks[conv_layer_name]
-        # )
-        # @set! st.attn_down_blocks[conv_layer_name] = new_st
+        x, new_st = conv_next_unet.attn_down_blocks[i](
+            x, ps.attn_down_blocks[conv_layer_name], st.attn_down_blocks[conv_layer_name]
+        )
+        @set! st.attn_down_blocks[conv_layer_name] = new_st
 
         skips = (skips..., x)
 
@@ -1247,10 +1256,10 @@ function (conv_next_unet::AttnParsConvNextUNet)(
         )
         @set! st.conv_up_blocks[layer_name] = new_st
         
-        # x, new_st = conv_next_unet.attn_up_blocks[i](
-        #     x, ps.attn_up_blocks[layer_name], st.attn_up_blocks[layer_name]
-        # )
-        # @set! st.attn_up_blocks[layer_name] = new_st
+        x, new_st = conv_next_unet.attn_up_blocks[i](
+            x, ps.attn_up_blocks[layer_name], st.attn_up_blocks[layer_name]
+        )
+        @set! st.attn_up_blocks[layer_name] = new_st
         
     end
 

@@ -58,11 +58,14 @@ include("SI/sampling.jl")
 include("SI/loss.jl")
 include("SI/training.jl")
 include("SI/time_stepping.jl")
+include("SI/diffusion.jl")
+
 
 # Models
 export StochasticInterpolantModel
 export ConditionalStochasticInterpolant
-export ForecastingStochasticInterpolant
+export FollmerStochasticInterpolant
+export DataDependentCouplingStochasticInterpolant
 
 # Sampling
 export sde_sampler
@@ -74,7 +77,7 @@ export SDE_heun
 export ODE_runge_kutta
 
 # Interpolants
-export linear_interpolant
+export Interpolant
 
 # Loss
 export get_loss
@@ -86,6 +89,10 @@ export train_stochastic_interpolant
 # Time stepping
 export compute_multiple_SDE_steps
 export compute_multiple_ODE_steps
+
+# Diffusion
+export Gamma
+export DiffusionCoefficient
 
 
 
@@ -111,7 +118,8 @@ export StandardizeData
 export NormalizePars
 
 # Testing
-export test_SI_time_stepping
+export compute_SDE_trajectories_RMSE
+export compute_ODE_trajectories_RMSE
 
 
 ##### Training #####

@@ -1,6 +1,6 @@
 
 """
-    ForecastingStochasticInterpolant(
+    FollmerStochasticInterpolant(
         unet::UNet,
         sde_sample::Function,
         ode_sample::Function,
@@ -10,7 +10,7 @@
 
 A container layer for the Stochastic Interpolant model
 """
-struct ForecastingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
+struct FollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
     (:velocity, )
 }
     velocity::Lux.AbstractExplicitLayer
@@ -24,107 +24,36 @@ struct ForecastingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
 end
 
 """
-ForecastingStochasticInterpolant(
-        image_size::Tuple{Int, Int}; 
-        in_channels::Int = 3,
-        channels=[32, 64, 96, 128], 
-        block_depth=2,
-        min_freq=1.0f0,
-        max_freq=1000.0f0,
-        embedding_dims=32,
-        num_steps=100,
+    FollmerStochasticInterpolant(
+        velocity::Lux.AbstractExplicitLayer; 
+        interpolant=Interpolant(),
+        gamma=Gamma(),
+        diffusion_coefficient=DiffusionCoefficient(),
+        diffusion_multiplier=0.1f0,
+        dev=gpu_device() 
     )
     
-    Constructs a Stochastic Interpolant model
+Constructs a Stochastic Interpolant model
 """
-function ForecastingStochasticInterpolant(
-    image_size::Tuple{Int, Int}; 
-    in_channels::Int = 3,
-    channels=[32, 64, 96, 128], 
-    block_depth=2,
-    min_freq=1.0f0,
-    max_freq=1000.0f0,
-    embedding_dims=32,
-    num_steps=100,
+function FollmerStochasticInterpolant(
+    velocity::Lux.AbstractExplicitLayer; 
+    interpolant=Interpolant(),
+    gamma=Gamma(),
+    diffusion_coefficient=DiffusionCoefficient(),
     diffusion_multiplier=0.1f0,
     dev=gpu_device()
 )
 
-    diffusion_multiplier = diffusion_multiplier |> dev
+    gamma(t) = diffusion_multiplier .* gamma.gamma(t)
+    dgamma_dt(t) = diffusion_multiplier .* gamma.dgamma_dt(t)
 
-    gamma(t) = diffusion_multiplier .* (1f0 .- t) # |> dev
-    # dgamma_dt(t) = -diffusion_multiplier .* ones(size(t))  # |> dev
-    dgamma_dt(t) = -diffusion_multiplier * ones(size(t)) |> dev #fill!(similar(t, size(t)), -diffusion_multiplier)
+    diffusion_coefficient(t) = diffusion_multiplier .* diffusion_coefficient.diffusion_coefficient(t)
 
-    diffusion_coefficient(t) = diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t)) # |> dev
-    # diffusion_coefficient(t) = diffusion_multiplier .* gamma(t) |> dev
+    alpha(t) = interpolant.alpha(t)
+    dalpha_dt(t) = interpolant.dalpha_dt(t)
 
-    alpha(t) = 1f0 .- t # |> dev
-    dalpha_dt(t) = -1f0  # |> dev
-
-    beta(t) = t.^2 # |> dev
-    dbeta_dt(t) = 2f0 .* t # |> dev
-
-    interpolant(x_0, x_1, t) = begin
-
-        I = alpha(t) .* x_0 .+ beta(t) .* x_1
-        dI_dt =  dalpha_dt(t) .* x_0 + dbeta_dt(t) .* x_1
-
-        return I, dI_dt
-    end
-
-
-    # velocity = ConditionalUNet(
-    #     image_size; 
-    #     in_channels=in_channels,
-    #     channels=channels, 
-    #     block_depth=block_depth,
-    #     min_freq=min_freq, 
-    #     max_freq=max_freq, 
-    #     embedding_dims=embedding_dims,
-    # )
-
-    # velocity =  ConvNextUNet(
-    #     image_size; 
-    #     in_channels=in_channels,
-    #     channels=channels, 
-    #     block_depth=block_depth,
-    #     min_freq=min_freq, 
-    #     max_freq=max_freq, 
-    #     embedding_dims=embedding_dims
-    # )
-    # velocity = DitParsConvNextUNet(
-    #     image_size; 
-    #     in_channels=in_channels,
-    #     channels=channels, 
-    #     block_depth=block_depth,
-    #     min_freq=min_freq, 
-    #     max_freq=max_freq, 
-    #     embedding_dims=embedding_dims,
-    #     pars_dim=1
-    # )
-    velocity = AttnParsConvNextUNet(
-        image_size; 
-        in_channels=in_channels,
-        channels=channels, 
-        block_depth=block_depth,
-        min_freq=min_freq, 
-        max_freq=max_freq, 
-        embedding_dims=embedding_dims,
-        pars_dim=1
-    )
-
-    # velocity = ConditionalDiffusionTransformer(
-    #     image_size;
-    #     in_channels=in_channels, 
-    #     patch_size=(8, 8),
-    #     embed_dim=256, 
-    #     depth=4, 
-    #     number_heads=8,
-    #     mlp_ratio=4.0f0, 
-    #     dropout_rate=0.1f0, 
-    #     embedding_dropout_rate=0.1f0,
-    # )
+    beta(t) = interpolant.beta(t)
+    dbeta_dt(t) = interpolant.dbeta_dt(t)
 
     diffusion_term(t, x, x_0, pars, ps, st) = begin
         return diffusion_coefficient(t)
@@ -177,5 +106,124 @@ function ForecastingStochasticInterpolant(
 
     return ForecastingStochasticInterpolant(
         velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
+    )
+end
+
+
+
+"""
+DataDependentCouplingStochasticInterpolant(
+        unet::UNet,
+        sde_sample::Function,
+        ode_sample::Function,
+        interpolant::Function
+    )
+    
+
+A container layer for the Stochastic Interpolant model
+"""
+struct DataDependentCouplingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
+    (:g_0, :g_1, :g_z)
+}
+    g_0::Lux.AbstractExplicitLayer; 
+    g_1::Lux.AbstractExplicitLayer; 
+    g_z::Lux.AbstractExplicitLayer; 
+    velocity::Function;
+    interpolant::Function
+    loss::Function
+    gamma::Function
+    diffusion_coefficient::Function
+    drift_term::Function
+    diffusion_term::Function
+end
+
+"""
+DataDependentCouplingStochasticInterpolant(
+        velocity::Lux.AbstractExplicitLayer; 
+        interpolant=Interpolant(),
+        gamma=Gamma(),
+        diffusion_coefficient=DiffusionCoefficient(),
+        diffusion_multiplier=0.1f0,
+        dev=gpu_device() 
+    )
+    
+Constructs a Stochastic Interpolant model
+"""
+function DataDependentCouplingStochasticInterpolant(
+    g_0::Lux.AbstractExplicitLayer; 
+    g_1::Lux.AbstractExplicitLayer; 
+    g_z::Lux.AbstractExplicitLayer; 
+    interpolant=Interpolant(),
+    gamma=Gamma(),
+    diffusion_coefficient=DiffusionCoefficient(),
+    diffusion_multiplier=0.1f0,
+    dev=gpu_device()
+)
+
+    gamma(t) = diffusion_multiplier .* gamma.gamma(t)
+    dgamma_dt(t) = diffusion_multiplier .* gamma.dgamma_dt(t)
+
+    diffusion_coefficient(t) = diffusion_multiplier .* diffusion_coefficient.diffusion_coefficient(t)
+
+    alpha(t) = interpolant.alpha(t)
+    dalpha_dt(t) = interpolant.dalpha_dt(t)
+
+    beta(t) = interpolant.beta(t)
+    dbeta_dt(t) = interpolant.dbeta_dt(t)
+
+    diffusion_term(t, x, pars, ps, st) = begin
+        return diffusion_coefficient(t)
+    end
+
+    score(t, x, x_0, pars, ps, st) = begin
+
+        _g_z, st_new  = g_z((x, x_0, pars, t) ps.g_z, st.g_z)
+        @set st.g_z = st_new
+
+        return _g_z ./ gamma(t), st
+
+    end
+
+    velocity(input, ps, st) = begin
+
+        x, x_0, pars, t = input
+
+        _g_0, st_new = g_0((x, x_0, pars, t), ps.g_0, st.g_0)
+        @set st.g_0 = st_new
+
+        _g_1, st_new  = g_1((x, x_0, pars, t), ps.g_1, st.g_1)
+        @set st.g_1 = st_new
+
+        _g_z, st_new  = g_z((x, x_0, pars, t), ps.g_z, st.g_z)
+        @set st.g_z = st_new
+
+        _velocity = dalpha_dt(t) .* _g_0 .+ dbeta_dt(t) .* _g_1 .+ gamma(t) .* _g_z, st
+
+        return _velocity, st
+    end
+
+    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+
+        _velocity, st = velocity((x, x_0, pars, t), ps, st)
+
+        if ode_mode
+            return _velocity
+        end
+        
+        _score, st = score(t, x, x_0, pars, ps, st) 
+
+        _diffusion_term = diffusion_term(t, x, pars, ps, st)
+        _diffusion_term = 0.5f0 .* diffusion_term .^ 2
+
+        return _velocity .- _diffusion_term .* _score, st
+    end
+
+    # Loss including the score network
+    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
+        x_0, x_1, pars, g_0, g_1, g_z, interpolant, gamma, ps, st, rng, dev
+    )
+
+    return ForecastingStochasticInterpolant(
+        g_0, g_1, g_z, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
     )
 end

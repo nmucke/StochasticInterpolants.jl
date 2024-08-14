@@ -150,13 +150,32 @@ num_epochs = 200000;
 num_samples = 9;
 
 ##### conditional SI model #####
-model = ForecastingStochasticInterpolant(
+
+velocity = AttnParsConvNextUNet(
     (H, W); 
     in_channels=C, 
     channels=[16, 32, 64, 128], 
     embedding_dims=embedding_dims, 
     block_depth=2,
-    num_steps=num_steps,
+    diffusion_multiplier=0.1f0,
+    pars_dim=pars_dim,
+    len_history=1,
+    use_attention_in_layer=[false, false, true, true],
+)
+
+gamma = t -> 1f0 .- t;
+dgamma_dt = t -> -ones(size(t));
+diffusion_coefficient = t -> sqrt.((3f0 .- t) .* (1f0 .- t));
+
+alpha = t -> 1f0 .- t; 
+beta = t -> t.^2;
+dalpha_dt = t -> -1f0;
+dbeta_dt = t -> 2f0 .* t;
+model = FollmerStochasticInterpolant(
+    velocity, 
+    interpolant=Interpolant(alpha, beta, dalpha_dt, dbeta_dt),
+    gamma=Gamma(gamma, dgamma_dt),
+    diffusion_coefficient=DiffusionCoefficient(diffusion_coefficient),
     diffusion_multiplier=0.1f0,
     dev=dev
 );
@@ -168,12 +187,13 @@ model_save_dir = "trained_models/forecasting_model";
 opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
+##### Load checkpoint #####
 continue_training = false;
 continue_epoch = 225;
-##### Load checkpoint #####
 if continue_training
     ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
 end;
+
 ##### Train stochastic interpolant #####
 ps, st = train_stochastic_interpolant(
     model=model,
@@ -284,7 +304,7 @@ preds_to_save = (x_true[:, :, 4, :], x_mean[:, :, 4, :], Float16.(x_mean[:, :, 4
 create_gif(preds_to_save, save_path, ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"])
 
 CUDA.reclaim()
-    GC.gc()
+GC.gc()
 
 
 
@@ -448,3 +468,52 @@ CUDA.reclaim()
 # x = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2);
 
 # create_gif((x, x), "HF.gif", ("lol", "lol"))
+
+
+
+
+
+
+
+
+
+
+# velocity = ConditionalUNet(
+#     image_size; 
+#     in_channels=in_channels,
+#     channels=channels, 
+#     block_depth=block_depth,
+#     min_freq=min_freq, 
+#     max_freq=max_freq, 
+#     embedding_dims=embedding_dims,
+# )
+# velocity =  ConvNextUNet(
+#     image_size; 
+#     in_channels=in_channels,
+#     channels=channels, 
+#     block_depth=block_depth,
+#     min_freq=min_freq, 
+#     max_freq=max_freq, 
+#     embedding_dims=embedding_dims
+# )
+# velocity = DitParsConvNextUNet(
+#     image_size; 
+#     in_channels=in_channels,
+#     channels=channels, 
+#     block_depth=block_depth,
+#     min_freq=min_freq, 
+#     max_freq=max_freq, 
+#     embedding_dims=embedding_dims,
+#     pars_dim=1
+# )
+# velocity = ConditionalDiffusionTransformer(
+#     image_size;
+#     in_channels=in_channels, 
+#     patch_size=(8, 8),
+#     embed_dim=256, 
+#     depth=4, 
+#     number_heads=8,
+#     mlp_ratio=4.0f0, 
+#     dropout_rate=0.1f0, 
+#     embedding_dropout_rate=0.1f0,
+# )
