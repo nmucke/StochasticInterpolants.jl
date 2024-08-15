@@ -112,14 +112,16 @@ export load_checkpoint
 
 # Data
 export load_transonic_cylinder_flow_data
+export load_isotropic_turbulence_data
 
 # Preprocessing
 export StandardizeData
 export NormalizePars
 
 # Testing
-export compute_SDE_trajectories_RMSE
-export compute_ODE_trajectories_RMSE
+export compute_RMSE
+export compute_spatial_frequency
+export compute_temporal_frequency
 
 
 ##### Training #####

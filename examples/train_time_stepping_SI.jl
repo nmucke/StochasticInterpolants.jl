@@ -30,11 +30,12 @@ Random.seed!(rng, 0);
 dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
-# Choose between "transonic_cylinder_flow" and "incompressible_cylinder_flow"
+# Choose between "transonic_cylinder_flow" and "isotropic_turbulence"
 test_case = "transonic_cylinder_flow";
 
 # Which type of testing to perform
-# options are "pars_extrapolation", "pars_interpolation", "long_rollouts"
+# options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
+# options are "z_extrapolation" for "isotropic_turbulence" test case
 test_args = "long_rollouts";
 
 # Load the test case configuration
@@ -47,7 +48,11 @@ data_folder = test_case_config["data_folder"];
 H = test_case_config["state_dimensions"]["height"];
 W = test_case_config["state_dimensions"]["width"];
 C = test_case_config["state_dimensions"]["channels"];
-num_pars = length(test_case_config["parameter_dimensions"]);
+if !isnothing(test_case_config["parameter_dimensions"])
+    pars_dim = length(test_case_config["parameter_dimensions"]);
+else
+    pars_dim = 0;
+end;
 
 # Load mask if it exists
 if test_case_config["with_mask"]
@@ -70,23 +75,43 @@ test_start_time = test_case_config["test_args"][test_args]["time_step_info"]["st
 test_num_steps = test_case_config["test_args"][test_args]["time_step_info"]["num_steps"];
 test_skip_steps = test_case_config["test_args"][test_args]["time_step_info"]["skip_steps"];
 
-# Load the training data
-trainset, trainset_pars = load_transonic_cylinder_flow_data(
-    data_folder=data_folder,
-    data_ids=test_case_config["training_args"]["ids"],
-    state_dims=(H, W, C),
-    num_pars=num_pars,
-    time_step_info=(start_time, num_steps, skip_steps)
-);
 
-# Load the test data
-testset, testset_pars = load_transonic_cylinder_flow_data(
-    data_folder=data_folder,
-    data_ids=test_case_config["test_args"][test_args]["ids"],
-    state_dims=(H, W, C),
-    num_pars=num_pars,
-    time_step_info=(test_start_time, test_num_steps, test_skip_steps)
-);
+if test_case == "transonic_cylinder_flow"
+    # Load the training data
+    trainset, trainset_pars = load_transonic_cylinder_flow_data(
+        data_folder=data_folder,
+        data_ids=test_case_config["training_args"]["ids"],
+        state_dims=(H, W, C),
+        num_pars=num_pars,
+        time_step_info=(start_time, num_steps, skip_steps)
+    );
+
+    # Load the test data
+    testset, testset_pars = load_transonic_cylinder_flow_data(
+        data_folder=data_folder,
+        data_ids=test_case_config["test_args"][test_args]["ids"],
+        state_dims=(H, W, C),
+        num_pars=num_pars,
+        time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+    );
+elseif test_case == "load_isotropic_turbulence"
+    # Load the training data
+    trainset, trainset_pars = load_isotropic_turbulence_data(
+        data_folder=data_folder,
+        data_ids=test_case_config["training_args"]["ids"],
+        state_dims=(H, W, C),
+        time_step_info=(start_time, num_steps, skip_steps)
+    );
+
+    # Load the test data
+    testset, testset_pars = load_isotropic_turbulence_data(
+        data_folder=data_folder,
+        data_ids=test_case_config["test_args"][test_args]["ids"],
+        state_dims=(H, W, C),
+        time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+    );
+end;
+
 
 # Normalize the data
 

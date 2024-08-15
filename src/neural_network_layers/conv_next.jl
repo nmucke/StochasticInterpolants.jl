@@ -692,12 +692,34 @@ function DitParsConvNextUNet(
 
     init_channels = div(channels[1], 2)
 
-    conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
-    init_conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
+    # init_channels = div(channels[1], 2)
+    init_channels = in_channels + in_channels * len_history
+
+
+    conv_in = Conv((7, 7), (init_channels => channels[1]); pad=3)
+    init_conv_in = Conv((7, 7), (len_history*in_channels => init_channels); pad=3)
+
+
+    # conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
+    # init_conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
 
     # conv_out = Conv((1, 1), channels[1] => in_channels; init_weight=Lux.zeros32)
 
-    t_pars_embedding_dims = div(embedding_dims, 2)
+    if pars_dim == 0
+        t_pars_embedding_dims = embedding_dims
+
+        pars_embedding = Lux.Identity()
+    else
+        t_pars_embedding_dims = div(embedding_dims, 2)
+
+        pars_embedding = Chain(
+            x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
+            Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
+            NNlib.gelu,
+            Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
+            NNlib.gelu,
+        )
+    end
 
     t_embedding = Chain(
         x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
@@ -707,13 +729,6 @@ function DitParsConvNextUNet(
         NNlib.gelu,
     )
 
-    pars_embedding = Chain(
-        x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
-        Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
-        NNlib.gelu,
-        Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
-        NNlib.gelu,
-    )
 
     conv_down_blocks = []
     dit_down_blocks = []
@@ -834,7 +849,6 @@ function DitParsConvNextUNet(
             )
         )
 
-
         if use_attention_in_layer[i]
             push!(dit_up_blocks, parameter_diffusion_transformer_block(
                 in_channels=channels[i + 1],
@@ -894,10 +908,11 @@ function (conv_next_unet::DitParsConvNextUNet)(
     t_emb, new_st = conv_next_unet.t_embedding(t, ps.t_embedding, st.t_embedding)
     @set! st.t_embedding = new_st
 
-    pars_emb, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
-    @set! st.pars_embedding = new_st
-
-    t_pars_embed = cat(t_emb, pars_emb; dims=1)
+    if conv_next_unet.pars_embedding != Lux.Identity()
+        pars_emb, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
+        @set! st.pars_embedding = new_st
+        t_pars_embed = cat(t_emb, pars_emb; dims=1)
+    end
 
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
     @set! st.conv_in = new_st
@@ -905,8 +920,16 @@ function (conv_next_unet::DitParsConvNextUNet)(
     @set! st.init_conv_in = new_st
 
 
+    if conv_next_unet.len_history > 0
+        x = cat(x, x_0; dims=3)
+    end
 
-    x = cat(x, x_0; dims=3)
+    x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
+    @set! st.conv_in = new_st
+    # x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
+    # @set! st.init_conv_in = new_st
+
+    # x = cat(x, x_0; dims=3)
     skips = (x, )
     for i in 1:length(conv_next_unet.conv_down_blocks)
 
@@ -1035,17 +1058,33 @@ function AttnParsConvNextUNet(
     
     multiplier = 2
 
-    pars_embedding = Chain(
-        Lux.Dense(pars_dim => pars_dim),
-        NNlib.gelu,
-        Lux.Dense(pars_dim => pars_dim),
-    )
-    pars_upsample = Upsample(:nearest; size=image_size)
+    init_channels = in_channels + in_channels * len_history
 
+    if pars_dim == 0
+        t_pars_embedding_dims = embedding_dims
+
+        pars_embedding = Lux.Identity()
+    else
+        # t_pars_embedding_dims = div(embedding_dims, 2)
+
+        # pars_embedding = Chain(
+        #     x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
+        #     Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
+        #     NNlib.gelu,
+        #     Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
+        #     NNlib.gelu,
+        # )
+        pars_embedding = Chain(
+            Lux.Dense(pars_dim => pars_dim),
+            NNlib.gelu,
+            Lux.Dense(pars_dim => pars_dim),
+        )
+        pars_upsample = Upsample(:nearest; size=image_size)
+
+        init_channels = init_channels + pars_dim
+    end
 
     # init_channels = div(channels[1], 2)
-    init_channels = in_channels + in_channels * len_history + pars_dim
-
 
     conv_in = Conv((7, 7), (init_channels => channels[1]); pad=3)
     init_conv_in = Conv((7, 7), (len_history*in_channels => init_channels); pad=3)
@@ -1208,17 +1247,21 @@ function (conv_next_unet::AttnParsConvNextUNet)(
     t_emb, new_st = conv_next_unet.t_embedding(t, ps.t_embedding, st.t_embedding)
     @set! st.t_embedding = new_st
 
-    pars, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
-    @set! st.pars_embedding = new_st
+    if conv_next_unet.pars_embedding != Lux.Identity()
+        pars, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
+        @set! st.pars_embedding = new_st
+    
+        pars = reshape(pars, (1, 1, size(pars)[1], size(pars)[end]))
+        pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
+        @set! st.pars_upsample = new_st
+    end
 
-    pars = reshape(pars, (1, 1, size(pars)[1], size(pars)[end]))
-    pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
-    @set! st.pars_upsample = new_st
-
-    if conv_next_unet.len_history < 1
+    if conv_next_unet.len_history < 1 && conv_next_unet.pars_embedding != Lux.Identity()
         x = cat(x, pars; dims=3)
-    else
+    elseif conv_next_unet.len_history > 0  && conv_next_unet.pars_embedding != Lux.Identity()
         x = cat(x, x_0, pars; dims=3)
+    elseif conv_next_unet.len_history > 0
+        x = cat(x, x_0; dims=3)
     end
 
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
