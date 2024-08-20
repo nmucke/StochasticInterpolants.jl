@@ -5,9 +5,9 @@ using NNlib
 using Setfield
 using ArrayPadding
 using LinearAlgebra
-using Boltz
+# using Boltz
 # import Boltz.VisionTransformerEncoder
-import Boltz.MultiHeadAttention as MultiHeadAttention
+# import Boltz.MultiHeadAttention as MultiHeadAttention
 
 
 ###############################################################################

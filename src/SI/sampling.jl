@@ -346,7 +346,7 @@ end
 function forecasting_sde_sampler(
     x_0::AbstractArray,
     pars::AbstractArray,
-    model::ForecastingStochasticInterpolant,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     num_steps::Int,
@@ -357,7 +357,7 @@ function forecasting_sde_sampler(
     # epsilon = 0.5f0
 
     # define time span
-    timesteps = LinRange(0.0f0, 1.0f0, num_steps) |> dev
+    timesteps = LinRange(0.0f0, 1.0f0, num_steps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
     x = x_0
@@ -366,12 +366,12 @@ function forecasting_sde_sampler(
     z = randn!(rng, similar(x, size(x)))
     dW = sqrt(dt) .* z
 
-    t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1])  |> dev 
+    t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1]) |> dev 
 
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 
-    # t = timesteps[1] |> dev #repeat(t, size(x_0)[1:3]...) |> dev
-    x = x + vel_t .* dt .+ model.gamma(t) .* dW
+    # Initial step
+    x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
 
     # Remaining steps
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st)
@@ -457,11 +457,12 @@ function ODE_heun(
 )
 
     num_steps = length(timesteps)
-    dt = Float32(timesteps[2] - timesteps[1]) |> dev
+    @allowscalar dt = Float32(timesteps[2] - timesteps[1])
 
     for i = 1:(num_steps-1)
 
-        t_drift = fill!(similar(x, 1), timesteps[i])
+        # @allowscalar t_drift = fill!(similar(x, 1), timesteps[i])
+        @allowscalar t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
 
         F1, st = drift_term(t_drift, x, pars, ps, st)        
         X1 = x .+ F1 .* dt
@@ -480,7 +481,7 @@ end
 function forecasting_ode_sampler(
     x_0::AbstractArray,
     pars::AbstractArray,
-    model::ForecastingStochasticInterpolant,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     num_steps::Int,
@@ -493,6 +494,7 @@ function forecasting_ode_sampler(
     x_0 = x_0 |> dev
 
     # drift_term(t, x, pars, ps, st) = model.drift_term((x, x_0, pars, t), ps, st)
+
 
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
     # x = ODE_runge_kutta(

@@ -15,7 +15,7 @@ struct FollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
 }
     velocity::Lux.AbstractExplicitLayer
     score::Function
-    interpolant::Function
+    interpolant::Interpolant
     loss::Function
     gamma::Function
     diffusion_coefficient::Function
@@ -27,8 +27,6 @@ end
     FollmerStochasticInterpolant(
         velocity::Lux.AbstractExplicitLayer; 
         interpolant=Interpolant(),
-        gamma=Gamma(),
-        diffusion_coefficient=DiffusionCoefficient(),
         diffusion_multiplier=0.1f0,
         dev=gpu_device() 
     )
@@ -38,16 +36,16 @@ Constructs a Stochastic Interpolant model
 function FollmerStochasticInterpolant(
     velocity::Lux.AbstractExplicitLayer; 
     interpolant=Interpolant(),
-    gamma=Gamma(),
-    diffusion_coefficient=DiffusionCoefficient(),
-    diffusion_multiplier=0.1f0,
+    # gamma=Gamma(t -> 1f0 .- t, t -> -ones(size(t))),
+    diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
+    # diffusion_multiplier=0.1f0,
     dev=gpu_device()
 )
 
-    gamma(t) = diffusion_multiplier .* gamma.gamma(t)
-    dgamma_dt(t) = diffusion_multiplier .* gamma.dgamma_dt(t)
+    gamma(t) = interpolant.gamma(t)
+    dgamma_dt(t) = interpolant.dgamma_dt(t)
 
-    diffusion_coefficient(t) = diffusion_multiplier .* diffusion_coefficient.diffusion_coefficient(t)
+    # _diffusion_coefficient(t) = diffusion_coefficient(t) #sqrt.((3f0 .- t) .* (1f0 .- t));#diffusion_coefficient.diffusion_coefficient(t)
 
     alpha(t) = interpolant.alpha(t)
     dalpha_dt(t) = interpolant.dalpha_dt(t)
@@ -101,10 +99,10 @@ function FollmerStochasticInterpolant(
 
     # Loss including the score network
     loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
-        x_0, x_1, pars, velocity, interpolant, gamma, dgamma_dt, ps, st, rng, dev
+        x_0, x_1, pars, velocity, interpolant, ps, st, rng, dev
     )
 
-    return ForecastingStochasticInterpolant(
+    return FollmerStochasticInterpolant(
         velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
     )
 end
@@ -150,8 +148,8 @@ DataDependentCouplingStochasticInterpolant(
 Constructs a Stochastic Interpolant model
 """
 function DataDependentCouplingStochasticInterpolant(
-    g_0::Lux.AbstractExplicitLayer; 
-    g_1::Lux.AbstractExplicitLayer; 
+    g_0::Lux.AbstractExplicitLayer,
+    g_1::Lux.AbstractExplicitLayer, 
     g_z::Lux.AbstractExplicitLayer; 
     interpolant=Interpolant(),
     gamma=Gamma(),
@@ -160,10 +158,10 @@ function DataDependentCouplingStochasticInterpolant(
     dev=gpu_device()
 )
 
-    gamma(t) = diffusion_multiplier .* gamma.gamma(t)
+    _gamma(t) = diffusion_multiplier .* gamma.gamma(t)
     dgamma_dt(t) = diffusion_multiplier .* gamma.dgamma_dt(t)
 
-    diffusion_coefficient(t) = diffusion_multiplier .* diffusion_coefficient.diffusion_coefficient(t)
+    _diffusion_coefficient(t) = diffusion_multiplier .* diffusion_coefficient.diffusion_coefficient(t)
 
     alpha(t) = interpolant.alpha(t)
     dalpha_dt(t) = interpolant.dalpha_dt(t)
@@ -172,12 +170,12 @@ function DataDependentCouplingStochasticInterpolant(
     dbeta_dt(t) = interpolant.dbeta_dt(t)
 
     diffusion_term(t, x, pars, ps, st) = begin
-        return diffusion_coefficient(t)
+        return _diffusion_coefficient(t)
     end
 
     score(t, x, x_0, pars, ps, st) = begin
 
-        _g_z, st_new  = g_z((x, x_0, pars, t) ps.g_z, st.g_z)
+        _g_z, st_new  = g_z((x, x_0, pars, t), ps.g_z, st.g_z)
         @set st.g_z = st_new
 
         return _g_z ./ gamma(t), st
@@ -220,10 +218,10 @@ function DataDependentCouplingStochasticInterpolant(
 
     # Loss including the score network
     loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
-        x_0, x_1, pars, g_0, g_1, g_z, interpolant, gamma, ps, st, rng, dev
+        x_0, x_1, pars, g_0, g_1, g_z, interpolant, _gamma, ps, st, rng, dev
     )
 
     return ForecastingStochasticInterpolant(
-        g_0, g_1, g_z, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
+        g_0, g_1, g_z, interpolant, loss, _gamma, _diffusion_coefficient, drift_term, diffusion_term
     )
 end

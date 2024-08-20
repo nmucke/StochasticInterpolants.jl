@@ -5,11 +5,68 @@ using NNlib
 using Setfield
 using ArrayPadding
 using LinearAlgebra
-using Boltz
+using GPUArraysCore
+# using Boltz
 # import Boltz.VisionTransformerEncoder
-import Boltz.MultiHeadAttention as MultiHeadAttention
+# import Boltz.MultiHeadAttention as MultiHeadAttention
+"""
+    _flatten_spatial(x::AbstractArray{T, 4})
 
+Flattens the first 2 dimensions of `x`, and permutes the remaining dimensions to (2, 1, 3)
+"""
+@inline function _flatten_spatial(x::AbstractArray{T, 4}) where {T}
+    return permutedims(reshape(x, (:, size(x, 3), size(x, 4))), (2, 1, 3))
+end
 
+"""
+    _fast_chunk(x::AbstractArray, ::Val{n}, ::Val{dim})
+
+Type-stable and faster version of `MLUtils.chunk`.
+"""
+@inline _fast_chunk(h::Int, n::Int) = (1:h) .+ h * (n - 1)
+@inline function _fast_chunk(x::AbstractArray, h::Int, n::Int, ::Val{dim}) where {dim}
+    return selectdim(x, dim, _fast_chunk(h, n))
+end
+@inline function _fast_chunk(x::AbstractArray, ::Val{N}, d::Val{D}) where {N, D}
+    return _fast_chunk.((x,), size(x, D) ÷ N, 1:N, d)
+end
+@inline function _fast_chunk(
+        x::GPUArraysCore.AnyGPUArray, h::Int, n::Int, ::Val{dim}) where {dim}
+    return copy(selectdim(x, dim, _fast_chunk(h, n)))
+end
+
+"""
+    MultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
+        attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0)
+
+Multi-head self-attention layer
+
+## Arguments
+
+  - `planes`: number of input channels
+  - `nheads`: number of heads
+  - `qkv_bias`: whether to use bias in the layer to get the query, key and value
+  - `attn_dropout_prob`: dropout probability after the self-attention layer
+  - `proj_dropout_prob`: dropout probability after the projection layer
+"""
+function MultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
+        attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0) where {T}
+    # @argcheck in_planes % number_heads == 0
+
+    qkv_layer = Lux.Dense(in_planes, in_planes * 3; use_bias=qkv_bias)
+    attention_dropout = Lux.Dropout(attention_dropout_rate)
+    projection = Lux.Chain(
+        Lux.Dense(in_planes => in_planes), Lux.Dropout(projection_dropout_rate))
+
+    return Lux.@compact(; number_heads, qkv_layer, attention_dropout,
+        projection, dispatch=:MultiHeadSelfAttention) do x::AbstractArray{<:Real, 3}
+        qkv = qkv_layer(x)
+        q, k, v = _fast_chunk(qkv, Val(3), Val(1))
+        y, _ = NNlib.dot_product_attention(
+            q, k, v; fdrop=attention_dropout, nheads=number_heads)
+        @return projection(y)
+    end
+end
 
 ###############################################################################
 # Diffusion Transformer
@@ -62,7 +119,7 @@ function patchify(
     @assert (im_width % patch_width == 0) && (im_height % patch_height == 0)
 
     return Lux.Chain(Lux.Conv(patch_size, in_channels => embed_planes; stride=patch_size),
-        flatten ? Boltz._flatten_spatial : identity, norm_layer(embed_planes))
+        flatten ? _flatten_spatial : identity, norm_layer(embed_planes))
 end
 
 """
@@ -103,7 +160,7 @@ function SpatialAttention(;
             patch_size=(1, 1), 
             embed_planes=embed_dim
         ),
-        attn = MultiHeadAttention(
+        attn = MultiHeadSelfAttention(
             embed_dim, 
             num_heads; 
             attention_dropout_rate=dropout_rate,
@@ -123,7 +180,7 @@ function SpatialAttention(;
         x = attn(x)
         x = unpatchify(x, imsize, (1, 1), embed_dim)
         x = conv_out(x)
-        return x + x_in
+        @return x + x_in
     end
 end
 
@@ -203,7 +260,7 @@ struct DiffusionTransformerBlock <: Lux.AbstractExplicitContainerLayer{
 }
     layer_norm_1::Lux.LayerNorm
     layer_norm_2::Lux.LayerNorm
-    attention::MultiHeadAttention
+    attention::Lux.AbstractExplicitLayer
     mlp::Chain
     adaLN_modulation::Lux.Chain
     hidden_size::Int
@@ -219,7 +276,7 @@ function DiffusionTransformerBlock(
     layer_norm_1 = Lux.LayerNorm((hidden_size, 1); affine=true)
     layer_norm_2 = Lux.LayerNorm((hidden_size, 1); affine=true)
 
-    attention = MultiHeadAttention(
+    attention = MultiHeadSelfAttention(
         hidden_size, num_heads; 
         attention_dropout_rate=0.1f0,
         projection_dropout_rate=0.1f0
@@ -258,7 +315,7 @@ function (dit_block::DiffusionTransformerBlock)(
     modulation, st_new = dit_block.adaLN_modulation(c, ps.adaLN_modulation, st.adaLN_modulation)
     @set! st.adaLN_modulation = st_new
 
-    shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = Boltz._fast_chunk(modulation, Val(6), Val(1))
+    shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = _fast_chunk(modulation, Val(6), Val(1))
 
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = reshape_modulation.(
         (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp), size(x, 2)
@@ -329,7 +386,7 @@ function (final_layer::FinalLayer)(
     modulation, st_new = final_layer.adaLN_modulation(t, ps.adaLN_modulation, st.adaLN_modulation)
     @set! st.adaLN_modulation = st_new
 
-    shift, scale = Boltz._fast_chunk(modulation, Val(2), Val(1))
+    shift, scale = _fast_chunk(modulation, Val(2), Val(1))
     shift, scale = reshape_modulation.((shift, scale), size(x, 2))
 
     x, st_new = final_layer.norm_final(x, ps.norm_final, st.norm_final)
@@ -430,7 +487,7 @@ function DiffusionTransformer(
         embed_planes=embed_dim
     )
 
-    positional_embedding = Boltz.ViPosEmbedding(embed_dim, number_patches)
+    positional_embedding = ViPosEmbedding(embed_dim, number_patches)
 
     # dit_blocks = [DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio), ]
     # for _ in 1:depth

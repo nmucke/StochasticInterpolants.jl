@@ -5,18 +5,48 @@ using NNlib
 using Setfield
 using ArrayPadding
 using LinearAlgebra
-using Boltz
-# import Boltz.VisionTransformerEncoder
-import Boltz.MultiHeadAttention as MultiHeadAttention
-using Lux.Experimental: @compact
+
+using Lux.Experimental: @compact 
+using Lux.Experimental: @kwdef
+using Lux.Experimental: @concrete
 
 
+"""
+    ViPosEmbedding(embedding_size, number_patches; init = randn32)
 
-function state_pars_identity()
+Positional embedding layer used by many vision transformer-like models.
+"""
+@kwdef @concrete struct ViPosEmbedding <: Lux.AbstractExplicitLayer
+    embedding_size::Int
+    number_patches::Int
+    init = randn32
+end
+
+@inline ViPosEmbedding(embedding_size::Int, number_patches::Int; init=randn32) = ViPosEmbedding(
+    embedding_size, number_patches, init)
+
+function LuxCore.initialparameters(rng::AbstractRNG, v::ViPosEmbedding)
+    return (; vectors=v.init(rng, v.embedding_size, v.number_patches))
+end
+
+@inline (v::ViPosEmbedding)(x, ps, st) = x .+ ps.vectors, st
+
+function Identity()
     @compact(
+        identity = nothing
+    ) do x
+        x = x
+        @return x
+    end
+end
+
+
+function StateParsIdentity()
+    @compact(
+        identity = nothing
     ) do x
         x, pars = x
-        x
+        @return x
     end
 end
 
@@ -56,7 +86,6 @@ function conv_next_block(;
     @compact(
         ds_conv = Lux.Conv((7, 7), in_channels => in_channels, pad=3, groups=in_channels),
         pars_mlp = Chain(
-            NNlib.gelu,
             Lux.Dense(pars_embed_dim => in_channels)
         ),
         conv_net = Chain(
@@ -80,7 +109,7 @@ function conv_next_block(;
         pars = reshape(pars, 1, 1, size(pars)...)
         h = h .+ pars
         h = conv_net(h)
-        h .+ res_conv(x)
+        @return h .+ res_conv(x)
     end
 end
 
@@ -112,7 +141,7 @@ function multiple_conv_next_blocks(;
             imsize=imsize
         ),
         block_2 = conv_next_block(
-            in_channels=in_channels, 
+            in_channels=out_channels, 
             out_channels=out_channels, 
             multiplier=multiplier,
             pars_embed_dim=embedding_dims,
@@ -121,167 +150,167 @@ function multiple_conv_next_blocks(;
     ) do x
         x, t = x
         x = block_1((x, t))
-        block_2((x, t))
+        @return block_2((x, t))
     end
 end
 
 
-###############################################################################
-# Conv Next Downblock
-###############################################################################
+# ###############################################################################
+# # Conv Next Downblock
+# ###############################################################################
 
-"""
-    ConvNextDownBlock(
-        in_channels::Int, 
-        out_channels::Int,
-        block_depth::Int
-    )
+# """
+#     ConvNextDownBlock(
+#         in_channels::Int, 
+#         out_channels::Int,
+#         block_depth::Int
+#     )
 
-Create a down block with the given number of input and output channels and
-block depth. The block consists of `block_depth` conv next blocks followed by
-a max pooling layer.
+# Create a down block with the given number of input and output channels and
+# block depth. The block consists of `block_depth` conv next blocks followed by
+# a max pooling layer.
 
-Based on https://yng87.page/en/blog/2022/lux-ddim/.
-"""
-struct ConvNextDownBlock <: Lux.AbstractExplicitContainerLayer{
-    (:conv_next_blocks, :maxpool)
-}
-    conv_next_blocks::Lux.AbstractExplicitLayer
-    maxpool::MaxPool
-end
+# Based on https://yng87.page/en/blog/2022/lux-ddim/.
+# """
+# struct ConvNextDownBlock <: Lux.AbstractExplicitContainerLayer{
+#     (:conv_next_blocks, :maxpool)
+# }
+#     conv_next_blocks::Lux.AbstractExplicitLayer
+#     maxpool::MaxPool
+# end
 
-function ConvNextDownBlock(;
-    in_channels::Int, 
-    out_channels::Int, 
-    block_depth::Int,
-    multiplier::Int = 1,
-    pars_embed_dim::Int = 1
-)
+# function ConvNextDownBlock(;
+#     in_channels::Int, 
+#     out_channels::Int, 
+#     block_depth::Int,
+#     multiplier::Int = 1,
+#     pars_embed_dim::Int = 1
+# )
 
-    layers = []
-    push!(layers, conv_next_block(
-        in_channels=in_channels, 
-        out_channels=out_channels, 
-        multiplier=multiplier, 
-        pars_embed_dim=pars_embed_dim
-    ))
-    for _ in 1:block_depth
-        push!(layers, conv_next_block(
-            in_channels=out_channels, 
-            out_channels=out_channels, 
-            multiplier=multiplier, 
-            pars_embed_dim=pars_embed_dim
-        ))
-    end
+#     layers = []
+#     push!(layers, conv_next_block(
+#         in_channels=in_channels, 
+#         out_channels=out_channels, 
+#         multiplier=multiplier, 
+#         pars_embed_dim=pars_embed_dim
+#     ))
+#     for _ in 1:block_depth
+#         push!(layers, conv_next_block(
+#             in_channels=out_channels, 
+#             out_channels=out_channels, 
+#             multiplier=multiplier, 
+#             pars_embed_dim=pars_embed_dim
+#         ))
+#     end
 
-    # disable optimizations to keep block index
-    conv_next_blocks = Chain(layers...; disable_optimizations=true)
+#     # disable optimizations to keep block index
+#     conv_next_blocks = Chain(layers...; disable_optimizations=true)
 
-    maxpool = MaxPool((2, 2); pad=0)
+#     maxpool = MaxPool((2, 2); pad=0)
 
-    return ConvNextDownBlock(conv_next_blocks, maxpool)
-end
+#     return ConvNextDownBlock(conv_next_blocks, maxpool)
+# end
 
-function (db::ConvNextDownBlock)(
-    x, 
-    ps::NamedTuple,
-    st::NamedTuple
-)
+# function (db::ConvNextDownBlock)(
+#     x, 
+#     ps::NamedTuple,
+#     st::NamedTuple
+# )
 
-    x, t = x
+#     x, t = x
 
-    skips = () # accumulate intermediate outputs
-    for i in 1:length(db.conv_next_blocks)
-        layer_name = Symbol(:layer_, i)
-        x, new_st = db.conv_next_blocks[i](
-            (x, t), 
-            ps.conv_next_blocks[layer_name],
-            st.conv_next_blocks[layer_name]
-        )
-        # Don't use push! on vector because it invokes Zygote error
-        skips = (skips..., x)
-        @set! st.conv_next_blocks[layer_name] = new_st
-    end
-    x, _ = db.maxpool(x, ps.maxpool, st.maxpool)
-    return (x, skips), st
-end
+#     skips = () # accumulate intermediate outputs
+#     for i in 1:length(db.conv_next_blocks)
+#         layer_name = Symbol(:layer_, i)
+#         x, new_st = db.conv_next_blocks[i](
+#             (x, t), 
+#             ps.conv_next_blocks[layer_name],
+#             st.conv_next_blocks[layer_name]
+#         )
+#         # Don't use push! on vector because it invokes Zygote error
+#         skips = (skips..., x)
+#         @set! st.conv_next_blocks[layer_name] = new_st
+#     end
+#     x, _ = db.maxpool(x, ps.maxpool, st.maxpool)
+#     return (x, skips), st
+# end
 
 
-###############################################################################
-# Conv Next Upblock
-###############################################################################
+# ###############################################################################
+# # Conv Next Upblock
+# ###############################################################################
 
-"""
-ConvNextUpBlock(
-        in_channels::Int, 
-        out_channels::Int,
-        block_depth::Int
-    )
+# """
+# ConvNextUpBlock(
+#         in_channels::Int, 
+#         out_channels::Int,
+#         block_depth::Int
+#     )
 
-Create an up block with the given number of input and output channels and
-block depth. The block consists of `block_depth` residual blocks followed by
-an upsampling layer.
+# Create an up block with the given number of input and output channels and
+# block depth. The block consists of `block_depth` residual blocks followed by
+# an upsampling layer.
 
-Based on https://yng87.page/en/blog/2022/lux-ddim/.
-"""
-struct ConvNextUpBlock <: Lux.AbstractExplicitContainerLayer{
-    (:conv_next_blocks, :upsample)
-}
-    conv_next_blocks::Lux.AbstractExplicitLayer
-    upsample::Upsample
-end
+# Based on https://yng87.page/en/blog/2022/lux-ddim/.
+# """
+# struct ConvNextUpBlock <: Lux.AbstractExplicitContainerLayer{
+#     (:conv_next_blocks, :upsample)
+# }
+#     conv_next_blocks::Lux.AbstractExplicitLayer
+#     upsample::Upsample
+# end
 
-function ConvNextUpBlock(;
-    in_channels::Int, 
-    out_channels::Int, 
-    block_depth::Int,
-    multiplier::Int = 1,
-    pars_embed_dim::Int = 1
-)
+# function ConvNextUpBlock(;
+#     in_channels::Int, 
+#     out_channels::Int, 
+#     block_depth::Int,
+#     multiplier::Int = 1,
+#     pars_embed_dim::Int = 1
+# )
 
-    layers = []
-    push!(layers, conv_next_block(
-        in_channels=in_channels + out_channels, 
-        out_channels=out_channels, 
-        multiplier=multiplier, 
-        pars_embed_dim=pars_embed_dim
-    ))
-    for _ in 1:block_depth
-        push!(layers, conv_next_block(
-            in_channels=out_channels * 2, 
-            out_channels=out_channels, 
-            multiplier=multiplier, 
-            pars_embed_dim=pars_embed_dim
-        ))
-    end
-    conv_next_blocks = Chain(layers...; disable_optimizations=true)
+#     layers = []
+#     push!(layers, conv_next_block(
+#         in_channels=in_channels + out_channels, 
+#         out_channels=out_channels, 
+#         multiplier=multiplier, 
+#         pars_embed_dim=pars_embed_dim
+#     ))
+#     for _ in 1:block_depth
+#         push!(layers, conv_next_block(
+#             in_channels=out_channels * 2, 
+#             out_channels=out_channels, 
+#             multiplier=multiplier, 
+#             pars_embed_dim=pars_embed_dim
+#         ))
+#     end
+#     conv_next_blocks = Chain(layers...; disable_optimizations=true)
 
-    upsample = Upsample(:bilinear; scale=2)
+#     upsample = Upsample(:bilinear; scale=2)
 
-    return ConvNextUpBlock(conv_next_blocks, upsample)
-end
+#     return ConvNextUpBlock(conv_next_blocks, upsample)
+# end
 
-function (up::ConvNextUpBlock)(
-    x, 
-    ps,
-    st::NamedTuple
-)
+# function (up::ConvNextUpBlock)(
+#     x, 
+#     ps,
+#     st::NamedTuple
+# )
 
-    x, skips, t = x
-    x, _ = up.upsample(x, ps.upsample, st.upsample)
-    for i in 1:length(up.conv_next_blocks)
-        layer_name = Symbol(:layer_, i)
-        x = cat(x, skips[end - i + 1]; dims=3) # cat on channel
-        x, new_st = up.conv_next_blocks[i](
-            (x, t), 
-            ps.conv_next_blocks[layer_name],
-            st.conv_next_blocks[layer_name]
-        )
-        @set! st.conv_next_blocks[layer_name] = new_st
-    end
+#     x, skips, t = x
+#     x, _ = up.upsample(x, ps.upsample, st.upsample)
+#     for i in 1:length(up.conv_next_blocks)
+#         layer_name = Symbol(:layer_, i)
+#         x = cat(x, skips[end - i + 1]; dims=3) # cat on channel
+#         x, new_st = up.conv_next_blocks[i](
+#             (x, t), 
+#             ps.conv_next_blocks[layer_name],
+#             st.conv_next_blocks[layer_name]
+#         )
+#         @set! st.conv_next_blocks[layer_name] = new_st
+#     end
 
-    return x, st
-end
+#     return x, st
+# end
 
 
 
@@ -374,7 +403,7 @@ function ConvNextUNet(
             ) do x
                 x, t = x
                 x = block_1((x, t))
-                block_2((x, t))
+                @return block_2((x, t))
             end
         )
 
@@ -451,7 +480,7 @@ function ConvNextUNet(
             ) do x
                 x, t = x
                 x = block_1((x, t))
-                block_2((x, t))
+                @return block_2((x, t))
             end
         )
     end
@@ -477,7 +506,7 @@ function ConvNextUNet(
             h = ds_conv(x)
             h = conv_net(h)
             x = h .+ x
-            final(x)
+            @return final(x)
         end
 
     return ConvNextUNet(
@@ -610,7 +639,7 @@ function parameter_diffusion_transformer_block(;
             patch_size=patch_size, 
             embed_planes=embed_dim
         ),
-        positional_embedding = Boltz.ViPosEmbedding(embed_dim, number_patches),
+        positional_embedding = ViPosEmbedding(embed_dim, number_patches),
         dit_block = DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio),
         final_layer = FinalLayer(embed_dim, patch_size, out_channels), # (E, patch_size ** 2 * out_channels, N)
     ) do x
@@ -627,7 +656,7 @@ function parameter_diffusion_transformer_block(;
 
         h = div(imsize[1], patch_size[1])
         w = div(imsize[2], patch_size[2])
-        unpatchify(x, (h, w), patch_size, out_channels)
+        @return unpatchify(x, (h, w), patch_size, out_channels)
     end
 end
 
@@ -708,7 +737,7 @@ function DitParsConvNextUNet(
     if pars_dim == 0
         t_pars_embedding_dims = embedding_dims
 
-        pars_embedding = Lux.Identity()
+        pars_embedding = Identity()
     else
         t_pars_embedding_dims = div(embedding_dims, 2)
 
@@ -759,7 +788,7 @@ function DitParsConvNextUNet(
                 number_patches=prod(div.(imsize, (1, 1)))
             ))
         else
-            push!(attn_down_blocks, state_pars_identity())
+            push!(attn_down_blocks, StateParsIdentity())
         end
 
 
@@ -812,7 +841,7 @@ function DitParsConvNextUNet(
             # )
         ) do x
             x, pars = x
-            dit_1((x, pars))
+            @return dit_1((x, pars))
             # dit_2((x, pars))
     end
 
@@ -862,7 +891,7 @@ function DitParsConvNextUNet(
                 number_patches=prod(div.(imsize, (1, 1)))
             ))
         else
-            push!(attn_down_blocks, state_pars_identity())
+            push!(attn_down_blocks, StateParsIdentity())
         end
     end
 
@@ -884,7 +913,7 @@ function DitParsConvNextUNet(
             h = ds_conv(x)
             h = conv_net(h)
             x = h .+ x
-            final(x)
+            @return final(x)
         end
 
     return DitParsConvNextUNet(
@@ -908,7 +937,7 @@ function (conv_next_unet::DitParsConvNextUNet)(
     t_emb, new_st = conv_next_unet.t_embedding(t, ps.t_embedding, st.t_embedding)
     @set! st.t_embedding = new_st
 
-    if conv_next_unet.pars_embedding != Lux.Identity()
+    if conv_next_unet.pars_embedding != Identity()
         pars_emb, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
         @set! st.pars_embedding = new_st
         t_pars_embed = cat(t_emb, pars_emb; dims=1)
@@ -1023,7 +1052,7 @@ struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
         :conv_in, :init_conv_in, :conv_out, :conv_down_blocks, 
         :down_blocks, :bottleneck1, :bottleneck2, :conv_up_blocks, 
         :up_blocks, :t_embedding, :pars_embedding, :attn_down_blocks,
-        :bottleneck_attn, :attn_up_blocks, :pars_upsample
+        :bottleneck_attn, :attn_up_blocks
     )
 }
     conv_in::Lux.AbstractExplicitLayer
@@ -1040,7 +1069,7 @@ struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     attn_down_blocks::Lux.AbstractExplicitLayer
     bottleneck_attn::Lux.AbstractExplicitLayer
     attn_up_blocks::Lux.AbstractExplicitLayer
-    pars_upsample::Lux.AbstractExplicitLayer
+    # pars_upsample::Lux.AbstractExplicitLayer
     len_history::Int
 end
 
@@ -1058,45 +1087,44 @@ function AttnParsConvNextUNet(
     
     multiplier = 2
 
-    init_channels = in_channels + in_channels * len_history
-
     if pars_dim == 0
         t_pars_embedding_dims = embedding_dims
 
-        pars_embedding = Lux.Identity()
+        pars_embedding = Identity()
     else
-        # t_pars_embedding_dims = div(embedding_dims, 2)
+        t_pars_embedding_dims = div(embedding_dims, 2)
 
-        # pars_embedding = Chain(
-        #     x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
-        #     Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
-        #     NNlib.gelu,
-        #     Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
-        #     NNlib.gelu,
-        # )
         pars_embedding = Chain(
-            Lux.Dense(pars_dim => pars_dim),
+            x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
+            Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
             NNlib.gelu,
-            Lux.Dense(pars_dim => pars_dim),
+            Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
+            NNlib.gelu,
         )
-        pars_upsample = Upsample(:nearest; size=image_size)
 
-        init_channels = init_channels + pars_dim
+        
+        # pars_embedding = Chain(
+        #     Lux.Dense(pars_dim => pars_dim),
+        #     NNlib.gelu,
+        #     Lux.Dense(pars_dim => pars_dim),
+        # )
+
+        # init_channels = init_channels + pars_dim
     end
 
-    # init_channels = div(channels[1], 2)
+    init_channels = div(channels[1], 2)
 
-    conv_in = Conv((7, 7), (init_channels => channels[1]); pad=3)
+    conv_in = Conv((7, 7), (in_channels => init_channels); pad=3)
     init_conv_in = Conv((7, 7), (len_history*in_channels => init_channels); pad=3)
 
     # channels[1] = channels[1] + pars_dim
 
 
     t_embedding = Chain(
-        x -> sinusoidal_embedding(x, min_freq, max_freq, embedding_dims),
-        Lux.Dense(embedding_dims => embedding_dims),
+        x -> sinusoidal_embedding(x, min_freq, max_freq, t_pars_embedding_dims),
+        Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
         NNlib.gelu,
-        Lux.Dense(embedding_dims => embedding_dims),
+        Lux.Dense(t_pars_embedding_dims => t_pars_embedding_dims),
         NNlib.gelu,
     )
 
@@ -1125,7 +1153,7 @@ function AttnParsConvNextUNet(
                 num_heads=4,
             ))
         else
-            push!(attn_down_blocks, Lux.Identity())
+            push!(attn_down_blocks, Identity())
         end
 
         push!(down_blocks, Conv(
@@ -1201,7 +1229,7 @@ function AttnParsConvNextUNet(
                 num_heads=4,
             ))
         else
-            push!(attn_up_blocks, Lux.Identity())
+            push!(attn_up_blocks, Identity())
         end
     end
 
@@ -1223,14 +1251,14 @@ function AttnParsConvNextUNet(
             h = ds_conv(x)
             h = conv_net(h)
             x = h .+ x
-            final(x)
+            @return final(x)
         end
 
     return AttnParsConvNextUNet(
         conv_in, init_conv_in, conv_out, conv_down_blocks, 
         down_blocks, bottleneck1, bottleneck2, conv_up_blocks, 
         up_blocks, t_embedding, pars_embedding, attn_down_blocks,
-        bottleneck_attn, attn_up_blocks, pars_upsample, len_history
+        bottleneck_attn, attn_up_blocks, len_history
     )
 end
 
@@ -1247,31 +1275,35 @@ function (conv_next_unet::AttnParsConvNextUNet)(
     t_emb, new_st = conv_next_unet.t_embedding(t, ps.t_embedding, st.t_embedding)
     @set! st.t_embedding = new_st
 
-    if conv_next_unet.pars_embedding != Lux.Identity()
-        pars, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
-        @set! st.pars_embedding = new_st
-    
-        pars = reshape(pars, (1, 1, size(pars)[1], size(pars)[end]))
-        pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
-        @set! st.pars_upsample = new_st
-    end
+    pars, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
+    @set! st.pars_embedding = new_st
 
-    if conv_next_unet.len_history < 1 && conv_next_unet.pars_embedding != Lux.Identity()
-        x = cat(x, pars; dims=3)
-    elseif conv_next_unet.len_history > 0  && conv_next_unet.pars_embedding != Lux.Identity()
-        x = cat(x, x_0, pars; dims=3)
-    elseif conv_next_unet.len_history > 0
-        x = cat(x, x_0; dims=3)
-    end
+    t_emb = cat(t_emb, pars; dims=1)
+
+    # if conv_next_unet.pars_embedding != Identity()
+    #     pars, new_st = conv_next_unet.pars_embedding(pars, ps.pars_embedding, st.pars_embedding)
+    #     @set! st.pars_embedding = new_st
+    
+    #     # pars = reshape(pars, (1, 1, size(pars)[1], size(pars)[end]))
+    #     # pars, new_st = conv_next_unet.pars_upsample(pars, ps.pars_upsample, st.pars_upsample)
+    #     # @set! st.pars_upsample = new_st
+
+    #     t_emb = cat(t_emb, pars; dims=1)
+    # end
+
+    # if conv_next_unet.len_history > 0
+    #     x = cat(x, x_0; dims=3)
+    # end
 
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
     @set! st.conv_in = new_st
-    # x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
-    # @set! st.init_conv_in = new_st
+    x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
+    @set! st.init_conv_in = new_st
 
-    # x = cat(x, x_0, pars; dims=3)
+    x = cat(x, x_0; dims=3)
     skips = (x, )
     for i in 1:length(conv_next_unet.conv_down_blocks)
+
         conv_layer_name = Symbol(:layer_, i)
         x, new_st = conv_next_unet.conv_down_blocks[i](
             (x, t_emb), ps.conv_down_blocks[conv_layer_name], st.conv_down_blocks[conv_layer_name]

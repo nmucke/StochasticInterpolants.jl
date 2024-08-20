@@ -5,13 +5,13 @@ Implementation of the Stochastic Interpolants method for generative modeling.
 """
 module StochasticInterpolants
 
-using Lux
-using Random
-using CUDA
-using NNlib
-using Setfield
-using LuxCUDA
-using Boltz
+# using Lux
+# using Random
+# using CUDA
+# using NNlib
+# using Setfield
+# using LuxCUDA
+# using Boltz
 
 
 ##### Layers #####
@@ -19,10 +19,12 @@ include("neural_network_layers/conv_next.jl")
 include("neural_network_layers/embeddings.jl")
 include("neural_network_layers/transformer.jl")
 include("neural_network_layers/conv.jl")
+
+export MultiHeadSelfAttention
 export residual_block
 export conv_next_block
-export ConvNextDownBlock
-export ConvNextUpBlock
+# export ConvNextDownBlock
+# export ConvNextUpBlock
 export UNet
 export ConditionalUNet
 export UpBlock, DownBlock
@@ -50,6 +52,7 @@ export dit_up_block
 
 
 ##### SI #####
+include("SI/diffusion.jl")
 include("SI/interpolants.jl")
 include("SI/models.jl")
 include("SI/conditional_models.jl")
@@ -58,7 +61,6 @@ include("SI/sampling.jl")
 include("SI/loss.jl")
 include("SI/training.jl")
 include("SI/time_stepping.jl")
-include("SI/diffusion.jl")
 
 
 # Models
@@ -76,6 +78,10 @@ export forecasting_ode_sampler
 export SDE_heun
 export ODE_runge_kutta
 
+# Diffusion
+export Gamma
+export DiffusionCoefficient
+
 # Interpolants
 export Interpolant
 
@@ -89,10 +95,6 @@ export train_stochastic_interpolant
 # Time stepping
 export compute_multiple_SDE_steps
 export compute_multiple_ODE_steps
-
-# Diffusion
-export Gamma
-export DiffusionCoefficient
 
 
 
@@ -113,6 +115,7 @@ export load_checkpoint
 # Data
 export load_transonic_cylinder_flow_data
 export load_isotropic_turbulence_data
+export prepare_data
 
 # Preprocessing
 export StandardizeData
@@ -122,6 +125,8 @@ export NormalizePars
 export compute_RMSE
 export compute_spatial_frequency
 export compute_temporal_frequency
+export compare_sde_pred_with_true
+export compare_ode_pred_with_true
 
 
 ##### Training #####

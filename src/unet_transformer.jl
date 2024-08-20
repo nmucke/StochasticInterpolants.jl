@@ -31,7 +31,7 @@ function dit_down_block(
     ) do x
         x, pars = x
         (x, skips) = down_block(x)
-        DiT((x, pars)), skips
+        @return DiT((x, pars)), skips
     end
 end
 
@@ -66,7 +66,7 @@ function dit_up_block(
     ) do x
         x, pars = x
         x = up_block(x)
-        DiT((x, pars))
+        @return DiT((x, pars))
     end
 end
 

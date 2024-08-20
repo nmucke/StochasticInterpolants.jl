@@ -174,9 +174,8 @@ function get_forecasting_loss(
     x_1::AbstractArray,
     pars::AbstractArray,
     velocity::Lux.AbstractExplicitLayer,
-    interpolant::Function, 
-    gamma::Function,
-    dgamma_dt::Function,
+    interpolant::Interpolant, 
+    # gamma::Gamma,
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -185,48 +184,14 @@ function get_forecasting_loss(
     num_steps = 30
     loss = 0.0
     batch_size = size(x_0)[end]
-    # for i = 1:batch_size
 
-    #     # copy along last dimension
-    #     x_0_batch = repeat(x_0[:, :, :, i:i], 1, 1, 1, num_steps)
-    #     x_1_batch = repeat(x_1[:, :, :, i:i], 1, 1, 1, num_steps)
-
-    #     t = rand(rng, Float32, (1, 1, 1, num_steps)) |> dev 
-
-    #     z = randn(rng, size(x_0_batch)) |> dev
-    #     z = sqrt.(t) .* z
-
-    #     g = gamma(t) |> dev
-    #     dg_dt = dgamma_dt(t) |> dev
-
-    #     I, dI_dt = interpolant(x_0_batch, x_1_batch, t) .|> dev
-    #     I = I .+ g .* z
-
-    #     R = dI_dt .+ dg_dt .* z
-
-    #     pred, st = velocity((I, x_0_batch, t), ps, st)
-
-    #     loss = loss + mean((pred - R).^2)
-
-    #     # loss = loss + mean(pred.^2 - 2 .* pred .* R)
-
-    # end
-    # loss = loss / batch_size
-
-    # copy along last dimension
-
-    # t = rand(rng, Float32, (1, 1, 1, batch_size)) |> dev 
     t = rand!(rng, similar(x_0, 1, 1, 1, batch_size))
     
-
-    # z = randn(rng, size(x_0)) |> dev
-    # z = sqrt.(t) .* z
-
     z = randn!(rng, similar(x_0, size(x_0)))
     z = sqrt.(t) .* z
 
-    g = gamma(t) |> dev
-    dg_dt = dgamma_dt(t) |> dev
+    g = interpolant.gamma(t) |> dev
+    dg_dt = interpolant.dgamma_dt(t) |> dev
 
     I = interpolant.interpolant(x_0, x_1, t) .|> dev
     dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
@@ -252,8 +217,8 @@ function get_forecasting_loss(
     g_0::Lux.AbstractExplicitLayer, 
     g_1::Lux.AbstractExplicitLayer, 
     g_z::Lux.AbstractExplicitLayer,
-    interpolant::Function, 
-    gamma::Function,
+    interpolant::Interpolant, 
+    gamma::Gamma,
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -265,7 +230,7 @@ function get_forecasting_loss(
 
     z = randn!(rng, similar(x_0, size(x_0)))
 
-    g = gamma(t) |> dev
+    g = gamma.gamma(t) |> dev
 
     I = interpolant.interpolant(x_0, x_1, t) .|> dev
 

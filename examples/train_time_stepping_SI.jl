@@ -4,23 +4,11 @@ ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
 
 using StochasticInterpolants
 using Lux
-using Random
-using CUDA
-using NNlib
-using Setfield
-using MLDatasets
-using Plots
-using Optimisers
-using Zygote
-using LuxCUDA
-using Images
-using ImageFiltering
-using Printf
-using Statistics
-using LinearAlgebra
-using NPZ
-using JSON
 using YAML
+using Random
+using NPZ
+using LuxCUDA
+using Optimisers
 
 # Set the seed
 rng = Random.default_rng();
@@ -82,7 +70,7 @@ if test_case == "transonic_cylinder_flow"
         data_folder=data_folder,
         data_ids=test_case_config["training_args"]["ids"],
         state_dims=(H, W, C),
-        num_pars=num_pars,
+        num_pars=pars_dim,
         time_step_info=(start_time, num_steps, skip_steps)
     );
 
@@ -91,7 +79,7 @@ if test_case == "transonic_cylinder_flow"
         data_folder=data_folder,
         data_ids=test_case_config["test_args"][test_args]["ids"],
         state_dims=(H, W, C),
-        num_pars=num_pars,
+        num_pars=pars_dim,
         time_step_info=(test_start_time, test_num_steps, test_skip_steps)
     );
 elseif test_case == "load_isotropic_turbulence"
@@ -112,9 +100,7 @@ elseif test_case == "load_isotropic_turbulence"
     );
 end;
 
-
 # Normalize the data
-
 normalize_data = StandardizeData(
     test_case_config["norm_mean"], 
     test_case_config["norm_std"],
@@ -154,53 +140,53 @@ testset = testset .* mask;
 # create_gif((x1, x2, x3), "HF.gif", ("Ma = $p1", "Ma = $p2", "Ma = $p3"))
 
 
-# Divide the training set into initial and target distributions
-trainset_init_distribution = trainset[:, :, :, 1:end-1, :];
-trainset_target_distribution = trainset[:, :, :, 2:end, :];
-trainset_pars = trainset_pars[:, 1:end-1, :];
-
-
-trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, (num_steps-1)*num_train);
-trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-1)*num_train);
-trainset_pars_distribution = reshape(trainset_pars, num_pars, (num_steps-1)*num_train);
-
-
 ##### Hyperparameters #####
-
 embedding_dims = 256;
 batch_size = 8;
 learning_rate = 5e-4;
 weight_decay = 1e-8;
 num_epochs = 200000;
 num_samples = 9;
+len_history = 1;
 
-##### conditional SI model #####
+# Prepare the data
+trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution = prepare_data(
+    trainset,
+    trainset_pars,
+    pars_dim,
+    len_history=len_history
+);
+
+##### Forecasting SI model #####
+# Define the velocity model
 velocity = AttnParsConvNextUNet(
     (H, W); 
     in_channels=C, 
     channels=[16, 32, 64, 128], 
     embedding_dims=embedding_dims, 
-    block_depth=2,
-    diffusion_multiplier=0.1f0,
     pars_dim=pars_dim,
-    len_history=1,
+    len_history=len_history,
     use_attention_in_layer=[false, false, true, true],
-)
+);
 
-gamma = t -> 1f0 .- t;
-dgamma_dt = t -> -ones(size(t));
-diffusion_coefficient = t -> sqrt.((3f0 .- t) .* (1f0 .- t));
+# Define interpolant and diffusion coefficients
+diffusion_multiplier = 0.25f0;
+
+gamma = t -> diffusion_multiplier.* (1f0 .- t);
+dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
 
 alpha = t -> 1f0 .- t; 
-beta = t -> t.^2;
 dalpha_dt = t -> -1f0;
+
+beta = t -> t.^2;
 dbeta_dt = t -> 2f0 .* t;
+
+# Initialise the SI model
 model = FollmerStochasticInterpolant(
-    velocity, 
-    interpolant=Interpolant(alpha, beta, dalpha_dt, dbeta_dt),
-    gamma=Gamma(gamma, dgamma_dt),
-    diffusion_coefficient=DiffusionCoefficient(diffusion_coefficient),
-    diffusion_multiplier=0.1f0,
+    velocity; 
+    interpolant=Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
+    diffusion_coefficient=diffusion_coefficient,
     dev=dev
 );
 ps, st = Lux.setup(rng, model) .|> dev;
@@ -212,8 +198,8 @@ opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
 ##### Load checkpoint #####
-continue_training = false;
-continue_epoch = 225;
+continue_training = true;
+continue_epoch = 30;
 if continue_training
     ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
 end;
@@ -238,6 +224,57 @@ ps, st = train_stochastic_interpolant(
     rng=rng,
     dev=dev
 )
+
+##### Test stochastic interpolant #####
+st_ = Lux.testmode(st);
+gif_save_path = "output/sde_SI";
+num_test_paths = 5;
+
+
+for num_generator_steps = 5:5:50;
+    print("Number of generator steps: ", num_generator_steps)
+    print("\n") 
+    compare_sde_pred_with_true(
+        model,
+        ps,
+        st_,
+        testset,
+        testset_pars,
+        num_test_paths,
+        normalize_data,
+        mask,
+        num_generator_steps,
+        gif_save_path,
+        rng,
+        dev,
+    )
+    print("####################################################")
+    print("\n")
+end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # test_init_condition = testset[:, :, :, 1:1, 1:1] |> dev;

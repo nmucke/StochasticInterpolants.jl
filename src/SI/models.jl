@@ -5,7 +5,7 @@ using NNlib
 using Setfield
 using StochasticInterpolants
 using LuxCUDA
-using DifferentialEquations
+# using DifferentialEquations
 
 """
     StochasticInterpolant(

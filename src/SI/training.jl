@@ -4,20 +4,20 @@ using Random
 using CUDA
 using NNlib
 using Setfield
-using MLDatasets
+# using MLDatasets
 using Plots
 using Optimisers
 using Zygote
 using LuxCUDA
-using Images
-using ImageFiltering
+# using Images
+# using ImageFiltering
 using Printf
 using Statistics
 using ProgressBars
 
 """
     train_stochastic_interpolant(
-        model::ConditionalStochasticInterpolant,
+        model,
         ps::NamedTuple,
         st::NamedTuple,
         opt_state::NamedTuple,
@@ -35,7 +35,7 @@ using ProgressBars
 Train the Stochastic Interpolant model.
 """
 function train_stochastic_interpolant(;
-    model::ForecastingStochasticInterpolant,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     opt_state::NamedTuple,
@@ -104,17 +104,17 @@ function train_stochastic_interpolant(;
         
         running_loss /= floor(Int, size(trainset_target_distribution)[end] / batch_size)
         
-        if epoch % 5 == 0
+        if epoch % 1 == 0
             print("Loss Value after $epoch iterations: $running_loss \n")
         end
 
 
-        if epoch % 25 == 0
+        if epoch % 10 == 0
 
             CUDA.reclaim()
             GC.gc()
 
-            # st_ = Lux.testmode(st)
+            st_ = Lux.testmode(st)
 
 
             if output_sde
@@ -131,7 +131,7 @@ function train_stochastic_interpolant(;
                 
                 pathwise_MSE = 0
                 mean_MSE = 0
-                x = zeros(size(testset)...);
+                x = zeros(size(testset)[1:3]..., num_test_steps, num_test_paths)
                 for i = 1:num_test_trajectories
 
                     test_init_condition = testset[:, :, :, 1:1, i]
@@ -141,7 +141,7 @@ function train_stochastic_interpolant(;
                         init_condition=test_init_condition,
                         parameters=test_pars,
                         num_physical_steps=num_test_steps,
-                        num_generator_steps=15,
+                        num_generator_steps=100,
                         num_paths=num_test_paths,
                         model=model,
                         ps=ps,
@@ -150,8 +150,7 @@ function train_stochastic_interpolant(;
                         dev=dev,
                         mask=mask,
                     )
-                
-                
+
                     if !isnothing(normalize_data)
                         x = normalize_data.inverse_transform(x)
                     end
@@ -161,27 +160,43 @@ function train_stochastic_interpolant(;
                     end
 
                     mean_pathwise_MSE, mean_mean_MSE = compute_RMSE(
-                        true_sol=x_true[:, :, :, :, i],
-                        pred_sol=x,
-                        mask=mask,
-                        gif_save_path=@sprintf("output/sde_SI_%i.gif", epoch)
+                        x_true[:, :, :, :, i], x, mask,
                     )
 
                     pathwise_MSE += mean_pathwise_MSE
                     mean_MSE += mean_mean_MSE
 
-                println("Mean of pathwise MSE: ", mean_pathwise_MSE)
-                println("Mean of mean MSE (SDE): ", mean_mean_MSE)
+                end
 
+                true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
+                pred_freq, pred_fft = compute_temporal_frequency(x)
+                pred_fft_mean = mean(pred_fft, dims=2)
+                pred_fft_min = minimum(pred_fft, dims=2)
+                pred_fft_max = maximum(pred_fft, dims=2)
+
+                plot(log2.(true_freq), log10.(true_fft .* true_fft .* true_fft), color=:blue, label="True", linewidth=3)
+                plot!(log2.(pred_freq), log10.(pred_fft_mean .* pred_fft_mean .* pred_fft_mean), color=:red, label="Pred", linewidth=3)
+                plot!(log2.(pred_freq), log10.(pred_fft_min .* pred_fft_min .* pred_fft_min), linestyle=:dash, color=:red)
+                plot!(log2.(pred_freq), log10.(pred_fft_max .* pred_fft_max .* pred_fft_max), linestyle=:dash, color=:red)
+                
+                frequency_save_path = @sprintf("output/sde_frequency_%i.png", epoch)
+                savefig(frequency_save_path)
+
+
+                pathwise_MSE /= num_test_trajectories
+                mean_MSE /= num_test_trajectories
+
+                println("Mean of pathwise MSE: ", pathwise_MSE)
+                println("Mean of mean MSE (SDE): ", mean_MSE)
 
                 x_mean = mean(x, dims=5)[:, :, :, :, 1];
                 x_std = std(x, dims=5)[:, :, :, :, 1];
 
-                gif_save_path = @sprintf("output/ode_SI_%i.gif", epoch)
+                gif_save_path = @sprintf("output/sde_SI_%i.gif", epoch)
                 preds_to_save = (
-                    x_true[:, :, :, 4, num_test_trajectories], 
+                    x_true[:, :, 4, :, num_test_trajectories], 
                     x_mean[:, :, 4, :], 
-                    Float16.(x_mean[:, :, 4, :]-x_true[:, :, :, 4, num_test_trajectories]), 
+                    Float16.(x_mean[:, :, 4, :]-x_true[:, :, 4, :, num_test_trajectories]), 
                     Float16.(x_std[:, :, 4, :]), 
                     x[:, :, 4, :, 1], 
                     x[:, :, 4, :, 2], 
@@ -194,7 +209,7 @@ function train_stochastic_interpolant(;
                     ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"]
                 )
 
-                if !isnothing(model_save_dir) && mean_pathwise_MSE < best_loss
+                if !isnothing(model_save_dir) && pathwise_MSE < best_loss
                     save_checkpoint(
                         ps=ps, 
                         st=st,
@@ -203,7 +218,7 @@ function train_stochastic_interpolant(;
                         epoch=epoch
                     )
 
-                    best_loss = mean_pathwise_MSE
+                    best_loss = pathwise_MSE
                 end
 
                 
@@ -213,15 +228,24 @@ function train_stochastic_interpolant(;
             
             end
 
-
-
+            pathwise_MSE = 0
+            mean_MSE = 0
             if output_ode
+                num_test_trajectories = size(testset)[end]
+                num_channels = size(testset, 3)
+                num_test_steps = size(testset, 4)
+                
+                if !isnothing(normalize_data)
+                    x_true = normalize_data.inverse_transform(testset)
+                else
+                    x_true = testset
+                end
                 
                 x = compute_multiple_ODE_steps(
-                    init_condition=test_init_condition,
-                    parameters=test_pars,
+                    init_condition=testset[:, :, :, 1, :],
+                    parameters=testset_pars[:, 1, :],
                     num_physical_steps=num_test_steps,
-                    num_generator_steps=25,
+                    num_generator_steps=100,
                     model=model,
                     ps=ps,
                     st=st_,
@@ -229,21 +253,39 @@ function train_stochastic_interpolant(;
                     mask=mask,
                 )
 
+
+                if !isnothing(normalize_data)
+                    x = normalize_data.inverse_transform(x)
+                end
+
+                if !isnothing(mask)
+                    x = x .* mask
+                end
+
+                
+                true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
+                pred_freq, pred_fft = compute_temporal_frequency(x)
+                pred_fft = pred_fft[:, num_test_trajectories]
+
+                plot(log2.(true_freq), log10.(true_fft .* true_fft .* true_fft), color=:blue, label="True", linewidth=3)
+                plot!(log2.(pred_freq), log10.(pred_fft .* pred_fft .* pred_fft_mean), color=:red, label="Pred", linewidth=3)
+                
+                frequency_save_path = @sprintf("output/ode_frequency_%i.png", epoch)
+                savefig(frequency_save_path)
+
+
+
                 num_channels = size(x, 3)
 
-                for i=1:num_test_trajectories
+                for i = 1:num_test_trajectories
                     mean_pathwise_MSE, mean_mean_MSE = compute_RMSE(
-                        true_sol=testset[:, :, :, :, i],
-                        pred_sol=x[:, :, :, :, i],
-                        mask=mask,
-                        gif_save_path=@sprintf("output/sde_SI_%i.gif", epoch)
+                        testset[:, :, :, :, i:i], x[:, :, :, :, i], mask,
                     )
 
                     pathwise_MSE += mean_pathwise_MSE
                     mean_MSE += mean_mean_MSE
 
                 end
-                
                 
                 x = x[:, :, 4, :, 1]
                 x_true = x_true[:, :, 4, :, 1]
@@ -253,7 +295,7 @@ function train_stochastic_interpolant(;
                 preds_to_save = (x_true, x, x-x_true)
                 create_gif(preds_to_save, save_path, ["True", "Pred", "Error"])
 
-                println("MSE (ODE): ", mean_pathwise_MSE)
+                println("MSE (ODE): ", pathwise_MSE)
                 
                 CUDA.reclaim()
                 GC.gc()

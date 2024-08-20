@@ -73,6 +73,7 @@ function load_isotropic_turbulence_data(;
     start_time, num_steps, skip_steps = time_step_info
 
     trainset_state = zeros(state_dims...,  num_steps, length(data_ids));
+    trainset_pars = zeros(num_pars, num_steps, length(data_ids));
     trajectory_counter = 1;
     for i = data_ids
         time_counter = 1;
@@ -92,5 +93,27 @@ function load_isotropic_turbulence_data(;
         trajectory_counter += 1
     end
 
-    return trainset_state, null
+    return trainset_state, trainset_pars
+end
+
+
+function prepare_data(
+    trainset,
+    trainset_pars,
+    pars_dim;
+    len_history = 1,
+)
+    H, W, C, num_steps, num_trajectories = size(trainset)
+    pars_dim = size(trainset_pars, 1)
+
+    # Divide the training set into initial and target distributions
+    trainset_init_distribution = trainset[:, :, :, 1:end-1, :];
+    trainset_target_distribution = trainset[:, :, :, 2:end, :];
+    trainset_pars = trainset_pars[:, 1:end-1, :];
+
+    trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, (num_steps-1)*num_trajectories);
+    trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-1)*num_trajectories);
+    trainset_pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-1)*num_trajectories);
+
+    return trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution
 end

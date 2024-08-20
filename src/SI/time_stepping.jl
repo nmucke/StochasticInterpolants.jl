@@ -14,7 +14,7 @@ function compute_multiple_SDE_steps(;
     num_physical_steps::Int,
     num_generator_steps::Int,
     num_paths::Int,
-    model::ForecastingStochasticInterpolant,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
@@ -63,21 +63,23 @@ function compute_multiple_ODE_steps(;
     parameters::AbstractArray,
     num_physical_steps::Int,
     num_generator_steps::Int,
-    model::ForecastingStochasticInterpolant,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     dev=gpu_device(),
     mask=nothing,
 )
     cpu_dev = LuxCPUDevice()
+
+    num_trajectories = size(init_condition)[end]
     
     if !isnothing(mask)
         mask = mask |> dev 
     end
     
-    sol = zeros(size(init_condition)[1:3]..., num_physical_steps, 1)
+    sol = zeros(size(init_condition)[1:3]..., num_physical_steps, num_trajectories)
 
-    sol[:, :, :, 1, :] = reshape(init_condition, size(init_condition)..., 1)
+    sol[:, :, :, 1, :] = init_condition # reshape(init_condition, size(init_condition)..., num_trajectories)
 
     parameters = parameters |> dev
 

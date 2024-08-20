@@ -5,7 +5,7 @@ using NNlib
 using Setfield
 using StochasticInterpolants
 using LuxCUDA
-using DifferentialEquations
+# using DifferentialEquations
 
 
 # sample(num_samples, ps, st, rng, dev) = StochasticInterpolants.euler_maruyama_sampler(

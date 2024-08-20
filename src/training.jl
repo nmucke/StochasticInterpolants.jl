@@ -4,13 +4,13 @@ using Random
 using CUDA
 using NNlib
 using Setfield
-using MLDatasets
+# using MLDatasets
 using Plots
 using Optimisers
 using Zygote
 using LuxCUDA
-using Images
-using ImageFiltering
+# using Images
+# using ImageFiltering
 using Printf
 using Statistics
 using ProgressBars
