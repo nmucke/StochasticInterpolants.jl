@@ -181,17 +181,19 @@ function get_forecasting_loss(
     rng::AbstractRNG,
     dev=gpu_device()
 )
-    num_steps = 30
     loss = 0.0
     batch_size = size(x_0)[end]
 
-    t = rand!(rng, similar(x_0, 1, 1, 1, batch_size))
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
     
-    z = randn!(rng, similar(x_0, size(x_0)))
+    z = randn!(rng, similar(x_1, size(x_1)))
     z = sqrt.(t) .* z
 
     g = interpolant.gamma(t) |> dev
     dg_dt = interpolant.dgamma_dt(t) |> dev
+
+    x_history = x_0
+    x_0 = x_0[:, :, :, end, :]
 
     I = interpolant.interpolant(x_0, x_1, t) .|> dev
     dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
@@ -200,7 +202,7 @@ function get_forecasting_loss(
 
     R = dI_dt .+ dg_dt .* z
 
-    pred, st = velocity((I, x_0, pars, t), ps, st)
+    pred, st = velocity((I, x_history, pars, t), ps, st)
 
     loss = mean((pred - R).^2)
 

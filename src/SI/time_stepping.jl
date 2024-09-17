@@ -30,18 +30,25 @@ function compute_multiple_SDE_steps(;
     
     sol = zeros(size(init_condition)[1:3]..., num_physical_steps, num_paths)
 
-    sol[:, :, :, 1, :] = repeat(init_condition, 1, 1, 1, num_paths)
+    sol[:, :, :, 1:model.velocity.len_history, :] = repeat(init_condition, 1, 1, 1, num_paths)
 
     pars = repeat(parameters, 1, num_paths) |> dev
 
-    x_n = sol[:, :, :, 1, :] |> dev
-    for i in ProgressBar(1:(num_physical_steps - 1))
+    # x_n = sol[:, :, :, 1:model.velocity.len_history, :] |> dev
+    for i in ProgressBar(model.velocity.len_history:(num_physical_steps - 1))
+
+        # if !isnothing(mask)
+        #     x_n = x_n .* mask
+        # end
+
+        
+        x_n = forecasting_sde_sampler(
+            sol[:, :, :, (i-model.velocity.len_history+1):i, :] |> dev, pars, model, ps, st, num_generator_steps, rng, dev
+        )
 
         if !isnothing(mask)
             x_n = x_n .* mask
         end
-        
-        x_n = forecasting_sde_sampler(x_n, pars, model, ps, st, num_generator_steps, rng, dev)
         
         sol[:, :, :, i+1, :] = x_n |> cpu_dev
 
@@ -79,19 +86,20 @@ function compute_multiple_ODE_steps(;
     
     sol = zeros(size(init_condition)[1:3]..., num_physical_steps, num_trajectories)
 
-    sol[:, :, :, 1, :] = init_condition # reshape(init_condition, size(init_condition)..., num_trajectories)
+    sol[:, :, :, 1:model.velocity.len_history, :] = init_condition # reshape(init_condition, size(init_condition)..., num_trajectories)
 
     parameters = parameters |> dev
 
-    x_n = sol[:, :, :, 1, :] |> dev
-    for i in ProgressBar(1:(num_physical_steps - 1))
+    # x_n = sol[:, :, :, 1, :] |> dev
+    for i in ProgressBar(model.velocity.len_history:(num_physical_steps - 1))
 
+
+        x_n = forecasting_ode_sampler(sol[:, :, :, (i-model.velocity.len_history+1):i, :], parameters, model, ps, st, num_generator_steps, dev)
+        
         if !isnothing(mask)
             x_n = x_n .* mask
         end
 
-        x_n = forecasting_ode_sampler(x_n, parameters, model, ps, st, num_generator_steps, dev)
-        
         sol[:, :, :, i+1, :] = x_n |> cpu_dev
 
         if findmax(abs.(x_n))[1] > 1e2

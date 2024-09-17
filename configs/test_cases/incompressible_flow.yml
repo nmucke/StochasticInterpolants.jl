@@ -1,0 +1,63 @@
+
+data_folder: "data/128_inc/128_inc"
+
+state_variables:
+  - velocity_x
+  - velocity_y
+  - pressure
+
+state_dimensions:
+  height: 64
+  width: 128
+  channels: 3
+
+parameter_dimensions:
+  Reynolds Number: 1
+
+with_mask: true
+
+# Training and test IDs
+training_args:
+  ids: [10, 11, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28] #, 29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 
+        # 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]
+  time_step_info:
+    start_time: 1000 # 800
+    num_steps: 150 #250
+    skip_steps: 2
+
+test_args:
+  pars_low:
+    ids: [0, 2, 4, 6, 8]
+    # ids: [20]
+    time_step_info:
+      start_time: 1000
+      num_steps: 60
+      skip_steps: 2
+
+  pars_high:
+    ids: [82, 84, 86, 88, 90]
+    time_step_info:
+      start_time: 1000
+      num_steps: 60
+      skip_steps: 2
+
+  pars_var:
+    ids: [14, 15]
+    # ids: [14]
+    time_step_info:
+      start_time: 300
+      num_steps: 100
+      skip_steps: 2
+
+
+
+
+# Normalization parameters
+# velocity_x: mean = 0.444969, std = 0.206128
+# velocity_y: mean = 0.000299, std = 0.206128
+# pressure: mean = 0.000586, std = 0.003942
+norm_mean: [0.444969, 0.000299, 0.000586]
+norm_std: [0.206128, 0.206128, 0.003942]
+
+pars_min: [100.0]
+pars_max: [1000.0]

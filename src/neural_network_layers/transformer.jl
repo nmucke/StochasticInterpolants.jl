@@ -9,6 +9,51 @@ using GPUArraysCore
 # using Boltz
 # import Boltz.VisionTransformerEncoder
 # import Boltz.MultiHeadAttention as MultiHeadAttention
+
+"""
+    position_encoding(dim_embedding::Int, max_length::Int=1000)
+
+Create a position encoding for a transformer model.
+
+Based on https://liorsinai.github.io/machine-learning/2022/05/18/transformers.html#position-encodings
+"""
+struct PositionEncoding{W <: AbstractArray}
+    weight::W
+end
+
+function PositionEncoding(dim_embedding::Int, max_length::Int=1000)
+    W = make_position_encoding(dim_embedding, max_length)
+    PositionEncoding(W)
+end
+
+function make_position_encoding(dim_embedding::Int, seq_length::Int, n::Int=10000)
+    encoding = Matrix{Float32}(undef, dim_embedding, seq_length)
+    for pos in 1:seq_length
+        for row in 0:2:(dim_embedding - 1)
+            denom = 1/(n^(row/dim_embedding))
+            encoding[row + 1, pos] = sin(pos * denom)
+            encoding[row + 2, pos] = cos(pos * denom)
+        end
+    end
+    encoding    
+end
+
+function Base.show(io::IO, pe::PositionEncoding)
+    print(io, "PositionEncoding($(size(pe.weight, 1)))")
+end
+
+(pe::PositionEncoding)(x::AbstractArray) = (pe::PositionEncoding)(size(x, 2))
+function (pe::PositionEncoding)(seq_length::Int)
+    max_length = size(pe.weight, 2)
+    if seq_length > max_length
+        error("sequence length of $seq_length exceeds maximum position encoding length of $max_length")
+    end
+    pe.weight[:, Base.OneTo(seq_length)]
+end
+
+
+
+
 """
     _flatten_spatial(x::AbstractArray{T, 4})
 
@@ -67,6 +112,130 @@ function MultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Boo
         @return projection(y)
     end
 end
+
+
+###############################################################################
+# Linear attention
+###############################################################################
+
+# Copied from NNLib
+split_heads(x, nheads) = reshape(x, size(x, 1) ÷ nheads, nheads, size(x)[2:end]...)
+join_heads(x) = reshape(x, :, size(x)[3:end]...)
+
+"""
+    LinearMultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
+        attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0)
+
+Linear Multi-head self-attention layer based on the paper "Efficient Attention: Attention with Linear Complexities"
+"""
+function LinearMultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
+        attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0) where {T}
+    # @argcheck in_planes % number_heads == 0
+
+    @compact(
+
+        projection = Lux.Chain(
+            Lux.Dense(in_planes => in_planes * 3; use_bias=false),
+            Lux.Dropout(projection_dropout_rate)
+        ),
+
+        scale = 1 / sqrt(Float32(in_planes))
+        
+    ) do x
+
+        x = projection(x) # (C * H, N, B) -> (C * H * 3, N, B)
+
+        q, k, v = _fast_chunk(x, Val(3), Val(1)) # (C * 3 * H, N, B) -> (C * H, N, B), (C * H, N, B), (C * H, N, B)
+        # q, k, v = x # (C, H, N, B)
+
+        q, k, v = split_heads.((q, k, v), number_heads) # (C * H, N, B) -> (C, H, N, B), (C, H, N, B), (C, H, N, B)
+
+        q = softmax(q, dims=1) # softmax over the channels
+        k = softmax(k, dims=3) # softmax over the sequence
+
+        q = q .* scale
+
+        v = permutedims(v, (3, 1, 2, 4)) # (C, H, N, B) -> (N, C, H, B)
+        kt = permutedims(k, (1, 3, 2, 4)) # (C, H, N, B) -> (C, N, H, B)
+        
+        x = batched_mul(kt, v) # (C, N, H, B) * (N, C, H, B) -> (C, C, H, B)
+
+        q = permutedims(q, (3, 1, 2, 4)) # (C, H, N, B) -> (N, C, H, B)
+        
+        x = batched_mul(q, x) # (N, C, H, B) * (C, C, H, B) -> (N, C, H, B)
+
+        x = permutedims(x, (2, 3, 1, 4)) # (N, C, H, B) -> (C, H, N, B)
+
+        @return join_heads(x) # (C, H, N, B) -> (C * H, N, B)
+
+    end
+end
+
+
+function LinearSpatialAttention(;
+    imsize,
+    in_channels,
+    embed_dim,
+    num_heads=1,
+    dropout_rate=0.1f0,
+)
+    @compact(
+        # norm = Lux.LayerNorm((in_channels, 1); affine=true),
+        _patchify = patchify(
+            imsize; 
+            in_channels=in_channels, 
+            patch_size=(1, 1), 
+            embed_planes=embed_dim * num_heads
+        ),
+        position_encoding = convert(Array{Float32}, make_position_encoding(embed_dim * num_heads, imsize[1]*imsize[2])),
+        norm_1 = Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
+        attn = LinearMultiHeadSelfAttention(
+            embed_dim * num_heads,
+            num_heads; 
+            attention_dropout_rate=dropout_rate,
+            projection_dropout_rate=dropout_rate
+        ),
+        norm_2 = Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
+        conv_out = Lux.Chain(
+            Lux.Dense(embed_dim * num_heads => embed_dim * num_heads),
+            NNlib.gelu,
+            Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
+            Lux.Dropout(dropout_rate),
+            Lux.Dense(embed_dim * num_heads => in_channels),
+        ),
+        skip_conv = Lux.Dense(embed_dim * num_heads => in_channels)
+
+        
+    ) do x
+        x = _patchify(x) # (Nx, Ny, C, B) -> (E * H, Nx*Ny, B)
+
+        x = x .+ position_encoding
+
+        x_skip = x
+
+        x = norm_1(x)
+
+        x = attn(x)
+
+        x += x_skip
+
+        x = norm_2(x)
+
+        x_skip = x
+
+        x = conv_out(x) # (E * H, Nx*Ny, B) -> (C, Nx*Ny, B)
+
+        x = x + skip_conv(x_skip)
+
+        x = unpatchify(x, imsize, (1, 1), in_channels) # (C, Nx*Ny, B) - > (Nx, Ny, C, B)
+
+        @return x
+
+    end
+end
+
+
+
 
 ###############################################################################
 # Diffusion Transformer

@@ -2,6 +2,7 @@
 
 using NPZ
 using JSON
+using FileIO
 
 
 function load_npz(data_path::String)
@@ -62,7 +63,19 @@ function load_transonic_cylinder_flow_data(;
 end
 
 
-function load_isotropic_turbulence_data(;
+"""
+    load_incompressible_flow_data(
+        data_folder::String,
+        data_ids::Array{Int},
+        state_dims::Tuple,
+        num_pars::Int,
+        time_step_info::Tuple
+    )
+
+Load the transonic cylinder flow data.
+"""
+
+function load_incompressible_flow_data(;
     data_folder,
     data_ids,
     state_dims,
@@ -88,6 +101,9 @@ function load_isotropic_turbulence_data(;
 
             trainset_state[:, :, :, time_counter, trajectory_counter] = data[:, :, :]
             
+            pars = JSON.parsefile("$(data_folder)/sim_$(trajectory)/src/description.json")
+            trainset_pars[1, time_counter, trajectory_counter] = pars["Reynolds Number"]
+
             time_counter += 1
         end
         trajectory_counter += 1
@@ -95,6 +111,34 @@ function load_isotropic_turbulence_data(;
 
     return trainset_state, trainset_pars
 end
+
+
+function load_turbulence_in_periodic_box_data(;
+    data_folder,
+    data_ids,
+    state_dims,
+    num_pars,
+    time_step_info
+) 
+    start_time, num_steps, skip_steps = time_step_info
+
+    data_train = load("data/periodic_box_turbulence_data.jld2", "data_train");
+    trainset_state = zeros(state_dims...,  num_steps, length(data_ids));
+    for i in 1:length(data_ids)
+        time_counter = 1
+        for j in start_time:skip_steps:(start_time+skip_steps*num_steps-1)
+            trainset_state[:, :, 1, time_counter, i] = data_train[i].data[1].u[j][1][2:end-1, 2:end-1]
+            trainset_state[:, :, 2, time_counter, i] = data_train[i].data[1].u[j][2][2:end-1, 2:end-1]
+            time_counter += 1
+        end
+    end
+    
+    trainset_pars = zeros(num_pars, num_steps, length(data_ids));
+
+    return trainset_state, trainset_pars
+
+end
+
 
 
 function prepare_data(

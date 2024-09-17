@@ -37,6 +37,10 @@ function StandardizeData(
     mean::AbstractArray, 
     std::AbstractArray
 )
+
+    mean = Float32.(mean)
+    std = Float32.(std)
+
     transform(x) = begin
         _mean, _std = expand_dims(x, mean, std)
         return (x .- _mean) ./ _std        
@@ -54,7 +58,7 @@ end
 function expand_dims_pars(
     data, min, max,
 )
-    
+
     num_dims = length(size(data))
     num_pars = size(data, 1)
 
@@ -84,6 +88,10 @@ function NormalizePars(
     min::AbstractArray, 
     max::AbstractArray
 )
+
+    min = Float32.(min)
+    max = Float32.(max)
+
     transform(x) = begin
         _min, _max = expand_dims_pars(x, min, max)
         return (x .- _min) ./ (_max - _min)

@@ -333,8 +333,8 @@ function SDE_runge_kutta(
         F3, st = drift_term(t3_drift, X3, pars, ps, st)
         G3 = diffusion_term(t3_diffusion, X3, pars, ps, st)
 
-        drift_t = (F0 .+ 2 .* F1 .+ 2 .* F2 .+ F3) ./ 6 .* dt
-        diffusion_t = (G0 .+ 2 .* G1 .+ 2 .* G2 .+ G3) ./ 6 .* dW
+        drift_t = (F0 .+ 2f0 .* F1 .+ 2f0 .* F2 .+ F3) ./ 6f0 .* dt
+        diffusion_t = (G0 .+ 2f0 .* G1 .+ 2f0 .* G2 .+ G3) ./ 6f0 .* dW
 
         x = x .+ drift_t .+ diffusion_t
 
@@ -360,7 +360,7 @@ function forecasting_sde_sampler(
     timesteps = LinRange(0.0f0, 1.0f0, num_steps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
-    x = x_0
+    x = x_0[:, :, :, end, :]
 
     # Initial step
     z = randn!(rng, similar(x, size(x)))
@@ -371,7 +371,8 @@ function forecasting_sde_sampler(
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 
     # Initial step
-    x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
+    # x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
+    x = x + vel_t .* dt .+ model.gamma(t) .* dW
 
     # Remaining steps
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st)
@@ -391,13 +392,17 @@ function forecasting_sde_sampler(
 
     # Final step
     # z = randn(rng, size(x_0)) |> dev
-    z = randn!(rng, similar(x_0, size(x_0)))
+    z = randn!(rng, similar(x, size(x)))
     
     t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
 
-    t = repeat(t, size(x_0)[1:3]...)
+    t = repeat(t, size(x)[1:3]...)
     x = x + vel_t .* dt .+ model.gamma(t) .* sqrt.(dt) .* z   
+
+    if !isnothing(model.projection)
+        x = model.projection(x, dev)
+    end
 
     return x
 
@@ -500,13 +505,17 @@ function forecasting_ode_sampler(
     # x = ODE_runge_kutta(
     x = ODE_heun(
         drift_term,
-        x_0,
+        x_0[:, :, :, end, :],
         pars,
         timesteps,
         ps,
         st,
         dev
     )
+
+    if !isnothing(model.projection)
+        x = model.projection(x)
+    end
 
     return x
 

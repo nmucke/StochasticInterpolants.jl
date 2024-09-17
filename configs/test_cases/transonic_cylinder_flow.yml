@@ -24,7 +24,7 @@ training_args:
   # ids: [10, 11, 12, 13, 14, 15, 16, 17, 18]
   time_step_info:
     start_time: 1
-    num_steps: 250
+    num_steps: 150
     skip_steps: 2
 
 test_args:

@@ -20,6 +20,8 @@ include("neural_network_layers/embeddings.jl")
 include("neural_network_layers/transformer.jl")
 include("neural_network_layers/conv.jl")
 
+export LinearMultiHeadSelfAttention
+export LinearSpatialAttention
 export MultiHeadSelfAttention
 export residual_block
 export conv_next_block
@@ -44,6 +46,7 @@ export parameter_diffusion_transformer_block
 export SpatialAttention
 export DitParsConvNextUNet
 export AttnParsConvNextUNet
+export conv_next_block_no_pars
 
 
 include("unet_transformer.jl")
@@ -104,6 +107,7 @@ include("checkpoint_utils.jl")
 include("data_utils.jl")
 include("preprocessing_utils.jl")
 include("testing_utils.jl")
+include("projections.jl")
 
 # Plotting
 export create_gif
@@ -114,7 +118,8 @@ export load_checkpoint
 
 # Data
 export load_transonic_cylinder_flow_data
-export load_isotropic_turbulence_data
+export load_incompressible_flow_data
+export load_turbulence_in_periodic_box_data
 export prepare_data
 
 # Preprocessing
@@ -123,10 +128,17 @@ export NormalizePars
 
 # Testing
 export compute_RMSE
+export compute_energy_spectra
 export compute_spatial_frequency
 export compute_temporal_frequency
 export compare_sde_pred_with_true
 export compare_ode_pred_with_true
+
+# Projections
+export divfunc
+export gradfunc
+export laplacefunc
+export project_onto_divergence_free
 
 
 ##### Training #####

@@ -1,0 +1,47 @@
+
+data_folder: "data/64_turb"
+
+state_variables:
+  - velocity_x
+  - velocity_y
+
+state_dimensions:
+  height: 64
+  width: 64
+  channels: 2
+
+parameter_dimensions:
+
+with_mask: false
+
+# Training and test IDs
+training_args:
+  ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] 
+  # ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] 
+  #, 29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 
+        # 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]
+  time_step_info:
+    start_time: 1
+    num_steps: 400
+    skip_steps: 4
+
+test_args:
+  pars_low:
+    # ids: [16, 17, 18, 19, 20]
+    ids: [16]
+    time_step_info:
+      start_time: 100
+      num_steps: 150
+      skip_steps: 4
+
+normalize_data: false
+
+
+# Normalization parameters
+# velocity_x: mean = 0.444969, std = 0.206128
+# velocity_y: mean = 0.000299, std = 0.206128
+norm_mean: [1.766131330172005e-8, 1.422475315049354e-8]
+norm_std: [0.7129140811183516, 0.6955684386129051]
+
+pars_min: [0.0]
+pars_max: [1.0]

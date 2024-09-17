@@ -21,6 +21,7 @@ struct FollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
     diffusion_coefficient::Function
     drift_term::Function
     diffusion_term::Function
+    projection
 end
 
 """
@@ -36,9 +37,8 @@ Constructs a Stochastic Interpolant model
 function FollmerStochasticInterpolant(
     velocity::Lux.AbstractExplicitLayer; 
     interpolant=Interpolant(),
-    # gamma=Gamma(t -> 1f0 .- t, t -> -ones(size(t))),
     diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
-    # diffusion_multiplier=0.1f0,
+    projection=nothing,
     dev=gpu_device()
 )
 
@@ -89,10 +89,9 @@ function FollmerStochasticInterpolant(
         A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
         A = 1 ./ A;
 
-        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
 
         score = A .* (beta(t) .* vel_t .- c)
-
 
         return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
     end
@@ -103,7 +102,7 @@ function FollmerStochasticInterpolant(
     )
 
     return FollmerStochasticInterpolant(
-        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term
+        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
     )
 end
 
