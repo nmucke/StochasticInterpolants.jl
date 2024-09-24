@@ -122,7 +122,8 @@ function load_turbulence_in_periodic_box_data(;
 ) 
     start_time, num_steps, skip_steps = time_step_info
 
-    data_train = load("data/periodic_box_turbulence_data.jld2", "data_train");
+    # data_train = load("data/periodic_box_turbulence_data.jld2", "data_train");
+    data_train = load(data_folder, "data_train");
     trainset_state = zeros(state_dims...,  num_steps, length(data_ids));
     for i in 1:length(data_ids)
         time_counter = 1
@@ -141,23 +142,28 @@ end
 
 
 
-function prepare_data(
+function prepare_data_for_time_stepping(
     trainset,
-    trainset_pars,
-    pars_dim;
+    trainset_pars;
     len_history = 1,
 )
     H, W, C, num_steps, num_trajectories = size(trainset)
     pars_dim = size(trainset_pars, 1)
 
-    # Divide the training set into initial and target distributions
-    trainset_init_distribution = trainset[:, :, :, 1:end-1, :];
-    trainset_target_distribution = trainset[:, :, :, 2:end, :];
-    trainset_pars = trainset_pars[:, 1:end-1, :];
-
-    trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, (num_steps-1)*num_trajectories);
-    trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-1)*num_trajectories);
-    trainset_pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-1)*num_trajectories);
+    trainset_init_distribution = zeros(H, W, C, len_history, num_steps-len_history, num_trajectories);
+    trainset_target_distribution = zeros(H, W, C, num_steps-len_history, num_trajectories);
+    for i in 1:num_trajectories
+        for step = 1:num_steps-len_history
+            trainset_init_distribution[:, :, :, :, step, i] = trainset[:, :, :, step:(step+len_history-1), i];
+            trainset_target_distribution[:, :, :, step, i] = trainset[:, :, :, step+len_history, i];
+        end;
+    end;
+    trainset_pars = trainset_pars[:, 1:(num_steps-len_history), :];
+    
+    trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, len_history, (num_steps-len_history)*num_trajectories);
+    trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-len_history)*num_trajectories);
+    trainset_pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-len_history)*num_trajectories);
+    
 
     return trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution
 end

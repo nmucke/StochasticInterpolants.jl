@@ -95,19 +95,25 @@ else
 end;
 
 
-# Normalize the data
-normalize_data = StandardizeData(
-    test_case_config["norm_mean"], 
-    test_case_config["norm_std"],
-);
-testset = normalize_data.transform(testset);
+if test_case_config["normalize_data"]
+    # Normalize the data
+    normalize_data = StandardizeData(
+        test_case_config["norm_mean"], 
+        test_case_config["norm_std"],
+    );
+    trainset = normalize_data.transform(trainset);
+    testset = normalize_data.transform(testset);
 
-# Normalize the parameters
-normalize_pars = NormalizePars(
-    test_case_config["pars_min"], 
-    test_case_config["pars_max"]
-);
-testset_pars = normalize_pars.transform(testset_pars);
+    # Normalize the parameters
+    normalize_pars = NormalizePars(
+        test_case_config["pars_min"], 
+        test_case_config["pars_max"]
+    );
+    trainset_pars = normalize_pars.transform(trainset_pars);
+    testset_pars = normalize_pars.transform(testset_pars);
+else
+    normalize_data = nothing;
+end;
 
 # Apply mask
 mask = mask |> cpu_dev;
@@ -116,16 +122,18 @@ testset = testset .* mask;
 
 
 ##### Hyperparameters #####
-embedding_dims = 256;
-batch_size = 8;
-learning_rate = 5e-4;
-weight_decay = 1e-8;
-num_epochs = 200000;
-num_samples = 9;
 len_history = 2;
-channels = [16, 32, 64, 128];
-# channels = [8, 16, 32, 64];
-use_attention_in_layer = [false, false, true, true];
+embedding_dims = 128;
+batch_size = 8;
+learning_rate = T(1e-4);
+weight_decay = T(1e-8);
+num_epochs = 4000;
+channels = [8, 16, 32, 64];
+attention_type = "DiT"; # "linear" or "standard" or "DiT"
+use_attention_in_layer = [false, false, false, false]; # [true, true, true, true];
+attention_embedding_dims = 64;
+num_heads = 4;
+projection = nothing 
 
 ##### Forecasting SI model #####
 # Define the velocity model
@@ -173,7 +181,7 @@ if continue_training
         best_model = "best_incompressible_model"
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
     elseif test_case == "turbulence_in_periodic_box"
-        best_model = "best_periodic_turbulence_model"
+        best_model = "checkpoint_epoch_300"
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
     end;
 end;
@@ -184,7 +192,7 @@ st_ = Lux.testmode(st);
 num_test_paths = 5;
 
 
-for num_generator_steps = [150];
+for num_generator_steps = [75];
     print("Number of generator steps: ", num_generator_steps)
 
     gif_save_path = "output/num_generator_steps_$num_generator_steps";

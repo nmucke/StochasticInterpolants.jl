@@ -5,6 +5,7 @@ using NNlib
 using Setfield
 using StochasticInterpolants
 using LuxCUDA
+using ForwardDiff
 
 """
     get_loss(
@@ -153,12 +154,11 @@ end
 
 
 """
-    get_loss(
+    get_forecasting_loss(
         x_0::AbstractArray, 
         x_1::AbstractArray,
-        t::AbstractArray, 
+        pars::AbstractArray,
         velocity::UNet,
-        score::UNet,
         interpolant::Function, 
         gamma::Function,
         ps::NamedTuple, 
@@ -175,7 +175,6 @@ function get_forecasting_loss(
     pars::AbstractArray,
     velocity::Lux.AbstractExplicitLayer,
     interpolant::Interpolant, 
-    # gamma::Gamma,
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -187,7 +186,7 @@ function get_forecasting_loss(
     t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
     
     z = randn!(rng, similar(x_1, size(x_1)))
-    z = sqrt.(t) .* z
+    # z = sqrt.(t) .* z
 
     g = interpolant.gamma(t) |> dev
     dg_dt = interpolant.dgamma_dt(t) |> dev
@@ -209,6 +208,65 @@ function get_forecasting_loss(
     # loss = loss + mean(pred.^2 - 2 .* pred .* R)
 
     return loss, st
+end
+
+
+"""
+    get_forecasting_loss(
+        x_0::AbstractArray, 
+        x_1::AbstractArray,
+        pars::AbstractArray,
+        velocity::UNet,
+        interpolant::Function, 
+        gamma::Function,
+        ps::NamedTuple, 
+        st::NamedTuple,
+        rng::AbstractRNG,
+        dev=gpu_device()
+    )
+
+Computes the loss for the stochastic interpolant Model.
+"""
+function get_forecasting_loss(
+    x_0::AbstractArray, 
+    x_1::AbstractArray,
+    pars::AbstractArray,
+    velocity::Lux.AbstractExplicitLayer,
+    score::Lux.AbstractExplicitLayer,
+    interpolant::Interpolant, 
+    ps::NamedTuple, 
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+    batch_size = size(x_0)[end]
+
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+    
+    z = randn!(rng, similar(x_1, size(x_1)))
+
+    g = interpolant.gamma(t) |> dev
+    dg_dt = interpolant.dgamma_dt(t) |> dev
+
+    x_history = x_0
+    x_0 = x_0[:, :, :, end, :]
+
+    I = interpolant.interpolant(x_0, x_1, t) .|> dev
+    dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
+
+    I = I .+ g .* z
+
+    R = dI_dt .+ dg_dt .* z
+
+    velocity_pred, st_new = velocity((I, x_history, pars, t), ps.velocity, st.velocity)
+    @set st.velocity = st_new
+    velocity_loss = mean(velocity_pred.^2 - 2f0 .* R .* velocity_pred)
+
+    score_pred, st_new = score((I, x_history, pars, t), ps.score, st.score)
+    @set st.score = st_new
+    score_loss = mean(score_pred.^2 - 2f0 .* z .* score_pred)
+
+    return velocity_loss + score_loss, st
 end
 
 
@@ -255,3 +313,94 @@ function get_forecasting_loss(
 
     return loss, st
 end
+
+
+
+"""
+    get_action_matching_loss(
+        x_0::AbstractArray, 
+        x_1::AbstractArray,
+        t::AbstractArray, 
+        velocity::UNet,
+        score::UNet,
+        interpolant::Function, 
+        gamma::Function,
+        ps::NamedTuple, 
+        st::NamedTuple,
+        rng::AbstractRNG,
+        dev=gpu_device()
+    )
+
+Computes the loss for the stochastic interpolant Model.
+"""
+# function get_action_matching_loss(
+#     x_0::AbstractArray, 
+#     x_1::AbstractArray,
+#     pars::AbstractArray,
+#     action::Lux.AbstractExplicitLayer,
+#     interpolant::Interpolant,
+#     diffusion_coefficient::Function,
+#     ps::NamedTuple, 
+#     st::NamedTuple,
+#     rng::AbstractRNG,
+#     dev=gpu_device()
+# )
+
+#     batch_size = size(x_0)[end]
+
+#     # Sample time
+#     t_0 = zeros(Float32, (1, 1, 1, batch_size)) |> dev
+#     t_1 = ones(Float32, (1, 1, 1, batch_size)) |> dev
+#     t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+
+#     # Sample noise
+#     # z = randn!(rng, similar(x_1, size(x_1)))
+#     # z = diffusion_coefficient .* z
+
+#     x_history = x_0
+#     x_0 = x_0[:, :, :, end, :]
+
+#     # Compute boundary terms
+#     left_boundary = action((x_0, x_history, pars, t_0), ps, st)
+#     right_boundary = action((x_1, x_history, pars, t_1), ps, st)
+
+#     loss = left_boundary - right_boundary
+
+#     # Compute time terms 
+#     s_t_samples = interpolant.interpolant(x_0, x_1, t) .|> dev
+
+#     forward_func_x = x -> action((x, x_history, pars, t), ps, st)
+#     forward_func_t = t -> action((s_t_samples, x_history, pars, t), ps, st)
+
+#     grad_s_t_term = ForwardDiff.gradient(forward_func_x, s_t_samples)
+#     grad_s_t_term = sum(0.5 .* grad_s_t_term.^2, (1, 2))
+
+#     ds_t_dt = ForwardDiff.derivative(forward_func_t, t)
+
+#     0.5*diffusion_coefficient(t)**2*(jvp_val*eps).sum(1, keepdims=True)
+
+
+#     funcres(x) = first(phi(x,res.minimizer))
+#     dxu        = ForwardDiff.derivative.(funcres, Array(x_plot))
+#     display(plot(x_plot,dxu,title = "Derivative",linewidth=3))
+
+
+
+
+
+
+
+    
+
+#     I = I .+ g .* z
+
+#     R = dI_dt .+ dg_dt .* z
+
+#     pred, st = velocity((I, x_history, pars, t), ps, st)
+
+#     loss = mean((pred - R).^2)
+
+#     # loss = loss + mean(pred.^2 - 2 .* pred .* R)
+
+#     return loss, st
+# end

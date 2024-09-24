@@ -153,8 +153,8 @@ function compute_energy_spectra(sol)
     nx = size(sol, 1);
     ny = size(sol, 2);
     
-    u = sol[:, :, 1, end, :];
-    v = sol[:, :, 2, end, :];
+    u = sol[:, :, 1, :];
+    v = sol[:, :, 2, :];
     
     u_fft = fft(u, [1, 2]);
     v_fft = fft(v, [1, 2]);
@@ -321,15 +321,19 @@ function compare_sde_pred_with_true(
     x_mean = mean(x, dims=5)[:, :, :, :, 1];
     x_std = std(x, dims=5)[:, :, :, :, 1];
 
+    x_true_plot = sqrt.(x_true[:, :, 1, :, num_test_trajectories].^2 + x_true[:, :, 2, :, num_test_trajectories].^2)
+    x_mean_plot = sqrt.(x_mean[:, :, 1, :].^2 + x_mean[:, :, 2, :].^2)
+    x_plot = sqrt.(x[:, :, 1, :, :].^2 + x[:, :, 2, :, :].^2)
+
     preds_to_save = (
-        x_true[:, :, end, :, num_test_trajectories], 
-        x_mean[:, :, end, :], 
-        Float16.(x_mean[:, :, end, :]-x_true[:, :, end, :, num_test_trajectories]), 
+        x_true_plot, 
+        x_mean_plot, 
+        Float16.(abs.(x_mean_plot-x_true_plot)), 
         Float16.(x_std[:, :, end, :]), 
-        x[:, :, end, :, 1], 
-        x[:, :, end, :, 2], 
-        x[:, :, end, :, 3], 
-        x[:, :, end, :, 4]
+        x_plot[:, :, :, 1], 
+        x_plot[:, :, :, 2], 
+        x_plot[:, :, :, 3], 
+        x_plot[:, :, :, 4]
     );
     create_gif(
         preds_to_save, 
@@ -353,8 +357,7 @@ function compare_ode_pred_with_true(
     mask,
     num_generator_steps,
     dev,
-    epoch,
-    pred_fft_mean,
+    gif_save_path
 )
 
     pathwise_MSE = 0
@@ -371,7 +374,7 @@ function compare_ode_pred_with_true(
     end
     
     x = compute_multiple_ODE_steps(
-        init_condition=testset[:, :, :, 1, :],
+        init_condition=testset[:, :, :, 1:model.velocity.len_history, :],
         parameters=testset_pars[:, 1, :],
         num_physical_steps=num_test_steps,
         num_generator_steps=num_generator_steps,
@@ -388,40 +391,75 @@ function compare_ode_pred_with_true(
     end
 
     if !isnothing(mask)
+        mask = mask |> cpu_device()
         x = x .* mask
     end
-
-    
-    true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
-    pred_freq, pred_fft = compute_temporal_frequency(x)
-    pred_fft = pred_fft[:, num_test_trajectories]
-
-    plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
-    plot!(pred_freq, pred_fft .* pred_fft .* pred_fft_mean, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
-    
-    frequency_save_path = @sprintf("output/ode_frequency_%i.png", epoch)
-    savefig(frequency_save_path)
-
 
     num_channels = size(x, 3)
 
     for i = 1:num_test_trajectories
         mean_pathwise_MSE, mean_mean_MSE = compute_RMSE(
-            testset[:, :, :, :, i:i], x[:, :, :, :, i], mask,
+            testset[:, :, :, :, i:i], x[:, :, :, :, i:i], mask,
         )
 
         pathwise_MSE += mean_pathwise_MSE
         mean_MSE += mean_mean_MSE
 
     end
+
+    x_true = testset[:, :, :, :, num_test_trajectories:num_test_trajectories]
+
+    # Total energy
+    energy_true = compute_total_energy(x_true)
+    energy_pred = compute_total_energy(x)
+
+    plot(energy_true, color=:blue, label="True", linewidth=3)
+    plot!(energy_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
+    plot!(mean(energy_pred, dims=2), color=:red, label="Pred", linewidth=5)
+    energy_save_path = gif_save_path * "_energy.png"
+    savefig(energy_save_path)
+
+    # Divergence
+    divergence_true = compute_divergence(x_true, mask)
+    divergence_pred = compute_divergence(x, mask)
+
+    plot(divergence_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
+    plot!(mean(divergence_pred, dims=2), color=:red, label="Pred", linewidth=5)
+    plot!(divergence_true, color=:blue, label="True", linewidth=2)
+    divergence_save_path = gif_save_path * "_divergence.png"
+    savefig(divergence_save_path)
+
+    # Energy spectra
+    energy_spectra_true = compute_energy_spectra(x_true[:, :, :, end, :])
+    energy_spectra_pred, K_bins = compute_energy_spectra(x[:, :, :, end, :])
+
+    plot(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
+    plot!(K_bins, energy_spectra_pred, color=:red, label="Pred", linewidth=3, xaxis=:log, yaxis=:log, alpha=0.25)
+    plot!(K_bins, mean(energy_spectra_pred, dims=2), color=:red, label="Pred", linewidth=5, xaxis=:log, yaxis=:log)
+    energy_spectra_save_path = gif_save_path * "_energy_spectra.png"
+    savefig(energy_spectra_save_path)
+
     
-    x = x[:, :, 4, :, 1]
-    x_true = x_true[:, :, 4, :, 1]
+    # true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
+    # pred_freq, pred_fft = compute_temporal_frequency(x)
+    # pred_fft = pred_fft[:, num_test_trajectories]
+
+    # plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
+    # plot!(pred_freq, pred_fft .* pred_fft .* pred_fft, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
     
-    save_path = @sprintf("output/ode_SI_%i.gif", epoch)
+    # frequency_save_path = @sprintf("output/ode_frequency_%i.png", epoch)
+    # savefig(frequency_save_path)
+
     
-    preds_to_save = (x_true, x, x-x_true)
-    create_gif(preds_to_save, save_path, ["True", "Pred", "Error"])
+    x_pred_plot = sqrt.(x[:, :, 1, :, 1].^2 + x[:, :, 2, :, 1].^2)
+    x_true_plot = sqrt.(x_true[:, :, 1, :, 1].^2 + x_true[:, :, 2, :, 1].^2)
+        
+    preds_to_save = (x_true_plot, x_pred_plot, x_pred_plot-x_true_plot)
+    create_gif(
+        preds_to_save, 
+        gif_save_path * ".gif",
+        ["True", "Pred", "Error"]
+    )
 
     println("MSE (ODE): ", pathwise_MSE)
     

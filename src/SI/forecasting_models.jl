@@ -78,12 +78,7 @@ function FollmerStochasticInterpolant(
         vel_t, st = velocity((x, x_0, pars, t), ps, st)
 
         if ode_mode
-
-            # score = 0.5f0 .* score
-
-            out = vel_t
-            
-            return out , st
+            return vel_t , st
         end
 
         A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
@@ -106,7 +101,90 @@ function FollmerStochasticInterpolant(
     )
 end
 
+"""
+    DataDependentCouplingStochasticInterpolant(
+        velocity::Lux.AbstractExplicitLayer
+        score::Lux.AbstractExplicitLayer
 
+    )
+    
+
+A container layer for the Stochastic Interpolant model
+"""
+struct DataDependentCouplingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
+    (:velocity, :score)
+}
+    velocity::Lux.AbstractExplicitLayer
+    score::Lux.AbstractExplicitLayer
+    interpolant::Interpolant
+    loss::Function
+    gamma::Function
+    diffusion_coefficient::Function
+    drift_term::Function
+    diffusion_term::Function
+    projection
+end
+
+"""
+    DataDependentCouplingStochasticInterpolant(
+        velocity::Lux.AbstractExplicitLayer; 
+        interpolant=Interpolant(),
+        diffusion_multiplier=0.1f0,
+        dev=gpu_device() 
+    )
+    
+Constructs a Stochastic Interpolant model
+"""
+function DataDependentCouplingStochasticInterpolant(
+    velocity::Lux.AbstractExplicitLayer; 
+    score::Lux.AbstractExplicitLayer,
+    interpolant=Interpolant(),
+    diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
+    projection=nothing,
+    dev=gpu_device()
+)
+
+    gamma(t) = interpolant.gamma(t)
+    dgamma_dt(t) = interpolant.dgamma_dt(t)
+
+    alpha(t) = interpolant.alpha(t)
+    dalpha_dt(t) = interpolant.dalpha_dt(t)
+
+    beta(t) = interpolant.beta(t)
+    dbeta_dt(t) = interpolant.dbeta_dt(t)
+
+    diffusion_term(t, x, x_0, pars, ps, st) = begin
+        return diffusion_coefficient(t)
+    end
+
+
+    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+
+        vel_t, st_new = velocity((x, x_0, pars, t), ps.velocity, st.velocity)
+        @set st.velocity = st_new
+
+        if ode_mode
+            return vel_t , st
+        end
+
+        score, st_new = score((x, x_0, pars, t), ps.score, st.score)
+        @set st.score = st_new
+
+        score_multiplication_term = 0.5f0 .* sqrt.(diffusion_coefficient(t)) ./ gamma(t)
+        score_term = score_multiplication_term .* score
+
+        return vel_t .+ score_term, st
+    end
+
+    # Loss including the score network
+    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
+        x_0, x_1, pars, velocity, score, interpolant, ps, st, rng, dev
+    )
+
+    return FollmerStochasticInterpolant(
+        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
+    )
+end
 
 """
 DataDependentCouplingStochasticInterpolant(
@@ -142,6 +220,7 @@ DataDependentCouplingStochasticInterpolant(
         diffusion_coefficient=DiffusionCoefficient(),
         diffusion_multiplier=0.1f0,
         dev=gpu_device() 
+    interpolant::Interpolant
     )
     
 Constructs a Stochastic Interpolant model
@@ -204,7 +283,7 @@ function DataDependentCouplingStochasticInterpolant(
         _velocity, st = velocity((x, x_0, pars, t), ps, st)
 
         if ode_mode
-            return _velocity
+            return _velocity, st
         end
         
         _score, st = score(t, x, x_0, pars, ps, st) 
@@ -222,5 +301,65 @@ function DataDependentCouplingStochasticInterpolant(
 
     return ForecastingStochasticInterpolant(
         g_0, g_1, g_z, interpolant, loss, _gamma, _diffusion_coefficient, drift_term, diffusion_term
+    )
+end
+
+
+"""
+    FollmerStochasticInterpolant(
+    )
+    
+
+A container layer for the Stochastic Interpolant model
+"""
+struct EntropicActionMatching <: Lux.AbstractExplicitContainerLayer{
+    (:action, :velocity)
+}
+    action::Lux.AbstractExplicitLayer
+    velocity::Function
+    loss::Function
+    interpolant::Interpolant
+    diffusion_coefficient::Function
+    drift_term::Function
+    diffusion_term::Function
+    projection
+end
+
+"""
+    EntropicActionMatching(
+        velocity::Lux.AbstractExplicitLayer; 
+        diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
+        projection=nothing,
+        dev=gpu_device()
+    )
+    
+Constructs a Stochastic Interpolant model
+"""
+function EntropicActionMatching(
+    action::Lux.AbstractExplicitLayer;
+    interpolant=Interpolant(),
+    diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
+    projection=nothing,
+    dev=gpu_device()
+)
+
+    diffusion_term(t, x, x_0, pars, ps, st) = begin
+        return diffusion_coefficient(t)
+    end
+
+    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+
+        vel_t, st = velocity((x, x_0, pars, t), ps, st)
+
+        return vel_t, st
+    end
+
+    # Loss including the score network
+    loss(x_0, x_1, pars, ps, st, rng, dev) = get_action_matching_loss(
+        x_0, x_1, pars, action, interpolant, diffusion_coefficient, ps, st, rng, dev
+    )
+
+    return EntropicActionMatching(
+        action, velocity, loss, diffusion_coefficient, drift_term, diffusion_term, projection
     )
 end

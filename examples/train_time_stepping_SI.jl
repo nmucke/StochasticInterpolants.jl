@@ -157,40 +157,36 @@ else
     normalize_data = nothing;
 end;
 
+# for i = 1:size(trainset, 5)
+#     for j = 1:size(trainset, 4)
+#         trainset[:, :, :, j, i] = project_onto_divergence_free(trainset[:, :, :, j, i], cpu_device());
+#     end;
+# end;
 
-# # Create a gif
-# x1, p1 = trainset[:, :, 1, :, 1], trainset_pars[1, 1, 1];
-# x2, p2 = trainset[:, :, 1, :, 2], trainset_pars[1, 1, 2];
-# x3, p3 = trainset[:, :, 1, :, 3], trainset_pars[1, 1, 3];
-# x4, p4 = trainset[:, :, 1, :, 4], trainset_pars[1, 1, 4];
-# x8, p8 = trainset[:, :, 1, :, 5], trainset_pars[1, 1, 5];
-# x5, p5 = trainset[:, :, 1, :, 6], trainset_pars[1, 1, 6];
-# x6, p6 = trainset[:, :, 1, :, 7], trainset_pars[1, 1, 7];
-# x7, p7 = trainset[:, :, 1, :, 8], trainset_pars[1, 1, 8];
+# Create a gif
+x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
+x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
+x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
+x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
+x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
+x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
+x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
+x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
 
-# create_gif(
-#     (x1, x2, x3, x4, x5, x6, x7, x8), 
-#     "HF.gif", 
-#     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
-# )
+create_gif(
+    (x1, x2, x3, x4, x5, x6, x7, x8), 
+    "HF.gif", 
+    ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+)
 
 
 len_history = 2;
 
-trainset_init_distribution = zeros(H, W, C, len_history, num_steps-len_history, num_train);
-trainset_target_distribution = zeros(H, W, C, num_steps-len_history, num_train);
-for i in 1:num_train
-    for step = 1:num_steps-len_history
-        trainset_init_distribution[:, :, :, :, step, i] = trainset[:, :, :, step:(step+len_history-1), i];
-        trainset_target_distribution[:, :, :, step, i] = trainset[:, :, :, step+len_history, i];
-    end;
-end;
-trainset_pars = trainset_pars[:, 1:(num_steps-len_history), :];
-
-trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, len_history, (num_steps-len_history)*num_train);
-trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-len_history)*num_train);
-trainset_pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-len_history)*num_train);
-
+trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution = prepare_data_for_time_stepping(
+    trainset,
+    trainset_pars;
+    len_history=len_history
+);
 
 
 ##### Hyperparameters #####
@@ -198,13 +194,13 @@ embedding_dims = 128;
 batch_size = 8;
 learning_rate = T(1e-4);
 weight_decay = T(1e-8);
-num_epochs = 2000;
-channels = [8, 16, 32, 64];
+num_epochs = 4000;
+channels = [16, 32, 64, 128];
 attention_type = "DiT"; # "linear" or "standard" or "DiT"
 use_attention_in_layer = [false, false, false, false]; # [true, true, true, true];
 attention_embedding_dims = 64;
 num_heads = 4;
-projection = project_onto_divergence_free;
+projection = nothing #project_onto_divergence_free;
 
 ##### Forecasting SI model #####
 # Define the velocity model
@@ -225,11 +221,15 @@ velocity = AttnParsConvNextUNet(
 
 
 # Define interpolant and diffusion coefficients
-diffusion_multiplier = 0.25f0;
+diffusion_multiplier = 0.1f0;
 
 gamma = t -> diffusion_multiplier.* (1f0 .- t);
 dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
 diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+
+# gamma = t -> diffusion_multiplier.* sqrt.(2f0 .* t .* (1f0 .- t));
+# dgamma_dt = t -> diffusion_multiplier .* (1f0 .- 2f0 .* t) ./ sqrt.(-2f0 .* (t .- 1f0) .* t);
+# diffusion_coefficient = t -> gamma(t); #diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
 
 alpha = t -> 1f0 .- t; 
 dalpha_dt = t -> -1f0;
@@ -237,6 +237,11 @@ dalpha_dt = t -> -1f0;
 beta = t -> t.^2;
 dbeta_dt = t -> 2f0 .* t;
 
+# alpha = t -> cos.(Float32(pi)/2f0 .* t); 
+# dalpha_dt = t -> -Float32(pi)/2f0 .*sin.(Float32(pi)/2f0 .* t);
+
+# beta = t -> sin.(Float32(pi)/2f0 .* t);
+# dbeta_dt = t -> Float32(pi)/2f0 .*cos.(Float32(pi)/2f0 .* t);
 
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
@@ -255,7 +260,7 @@ opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
 ##### Load checkpoint #####
-continue_training = false;
+continue_training = true;
 if continue_training
     if test_case == "transonic_cylinder_flow"
         best_model = "checkpoint_transonic_best"
@@ -264,7 +269,7 @@ if continue_training
         best_model = "best_incompressible_model"
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
     elseif test_case == "turbulence_in_periodic_box"
-        continue_epoch = 100;
+        continue_epoch = 250;
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
     end;
 end;
@@ -280,7 +285,7 @@ ps, st = train_stochastic_interpolant(
     trainset_pars_distribution=trainset_pars_distribution,
     testset=testset,
     testset_pars=testset_pars,
-    num_test_paths=5,
+    num_test_paths=10,
     model_save_dir=model_save_dir,
     num_epochs=num_epochs,
     batch_size=batch_size,
@@ -294,6 +299,83 @@ ps, st = train_stochastic_interpolant(
 
 
 
+##### Test stochastic interpolant #####
+st_ = Lux.testmode(st);
+gif_save_path = "output/ode_SI";
+num_test_paths = 5;
+
+compare_ode_pred_with_true(
+    model,
+    ps,
+    st_,
+    testset,
+    testset_pars,
+    normalize_data,
+    mask,
+    50,
+    dev,
+    gif_save_path,
+)
+
+compare_sde_pred_with_true(
+    model,
+    ps,
+    st_,
+    testset,
+    testset_pars,
+    num_test_paths,
+    normalize_data,
+    mask,
+    25,
+    gif_save_path,
+    rng,
+    dev,
+)
+
+# for num_generator_steps = 45:50;
+#     print("Number of generator steps: ", num_generator_steps)
+#     print("\n") 
+#     compare_sde_pred_with_true(
+#         model,
+#         ps,
+#         st_,
+#         testset,
+#         testset_pars,
+#         num_test_paths,
+#         normalize_data,
+#         mask,
+#         num_generator_steps,
+#         gif_save_path,
+#         rng,
+#         dev,
+#     )
+#     print("####################################################")
+#     print("\n")
+# end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+t_vec = LinRange(0, 1, 25);
+t_vec = sqrt.(t_vec);
+
+dt_vec = diff(t_vec)
 
 
 

@@ -258,9 +258,9 @@ function SDE_heun(
 )
 
     num_steps = length(timesteps)
-    dt = Float32(timesteps[2] - timesteps[1]) |> dev
 
     for i = 1:(num_steps-1)
+        dt = Float32(timesteps[i+1] - timesteps[i]) |> dev
 
         # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
         t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
@@ -358,6 +358,7 @@ function forecasting_sde_sampler(
 
     # define time span
     timesteps = LinRange(0.0f0, 1.0f0, num_steps)
+    # timesteps = sqrt.(timesteps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
     x = x_0[:, :, :, end, :]
@@ -393,6 +394,8 @@ function forecasting_sde_sampler(
     # Final step
     # z = randn(rng, size(x_0)) |> dev
     z = randn!(rng, similar(x, size(x)))
+
+    dt = Float32.(timesteps[end] - timesteps[end-1])
     
     t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
     vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
@@ -420,11 +423,13 @@ function ODE_runge_kutta(
 )
 
     num_steps = length(timesteps)
-    dt = Float32(timesteps[2] - timesteps[1]) |> dev
+    @allowscalar dt = Float32(timesteps[2] - timesteps[1])
 
     for i = 1:(num_steps-1)
 
-        t_drift = fill!(similar(x, 1), timesteps[i])
+        # t_drift = fill!(similar(x, 1), timesteps[i])
+        # t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
+        @allowscalar t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
 
         X0 = x
         t0_drift = t_drift
@@ -466,6 +471,7 @@ function ODE_heun(
 
     for i = 1:(num_steps-1)
 
+        # t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
         # @allowscalar t_drift = fill!(similar(x, 1), timesteps[i])
         @allowscalar t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
 
@@ -502,8 +508,8 @@ function forecasting_ode_sampler(
 
 
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
-    # x = ODE_runge_kutta(
-    x = ODE_heun(
+    x = ODE_runge_kutta(
+    # x = ODE_heun(
         drift_term,
         x_0[:, :, :, end, :],
         pars,

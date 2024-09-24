@@ -280,8 +280,8 @@ function get_attention_layer(
             number_heads=4,
             mlp_ratio=2,
             imsize=imsize,
-            patch_size=(4, 4),
-            number_patches=prod(div.(imsize, (4, 4)))
+            patch_size=(1, 1),
+            number_patches=prod(div.(imsize, (1, 1)))
         )
     else
         attention_layer = Identity()

@@ -120,7 +120,7 @@ export load_checkpoint
 export load_transonic_cylinder_flow_data
 export load_incompressible_flow_data
 export load_turbulence_in_periodic_box_data
-export prepare_data
+export prepare_data_for_time_stepping
 
 # Preprocessing
 export StandardizeData

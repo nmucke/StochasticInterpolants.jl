@@ -54,17 +54,17 @@ function train_stochastic_interpolant(;
     dev=gpu_device()
 )
 
-    init_learning_rate = 1e-3
+    init_learning_rate = 1e-4
     new_learning_rate = init_learning_rate
 
     min_learning_rate = 1e-6
 
-    output_sde = true
-    output_ode = false
+    output_sde = false
+    output_ode = true
 
-    early_stop_patience = 10
+    early_stop_patience = 100
 
-    num_generator_steps = 50
+    num_generator_steps = 20
 
     num_steps = size(testset, 4)
 
@@ -125,7 +125,7 @@ function train_stochastic_interpolant(;
         Optimisers.adjust!(opt_state, new_learning_rate)
 
 
-        if epoch % 25 == 0
+        if epoch % 10 == 0
 
             CUDA.reclaim()
             GC.gc()
@@ -206,65 +206,52 @@ function train_stochastic_interpolant(;
                 else
                     x_true = testset
                 end
+
                 
-                x = compute_multiple_ODE_steps(
-                    init_condition=testset[:, :, :, 1:model.velocity.len_history, :],
-                    parameters=testset_pars[:, 1, :],
-                    num_physical_steps=num_test_steps,
-                    num_generator_steps=20,
-                    model=model,
-                    ps=ps,
-                    st=st_,
-                    dev=dev,
-                    mask=mask,
+                # pathwise_MSE = 0
+                # mean_MSE = 0
+                # x = zeros(size(testset)[1:3]..., num_test_steps, num_test_paths)
+                gif_save_path = @sprintf("output/ode_SI_%i", epoch)
+                pathwise_MSE, mean_MSE = compare_ode_pred_with_true(
+                    model,
+                    ps,
+                    st_,
+                    testset,
+                    testset_pars,
+                    normalize_data,
+                    mask,
+                    num_generator_steps,
+                    dev,
+                    gif_save_path,
                 )
 
-
-                if !isnothing(normalize_data)
-                    x = normalize_data.inverse_transform(x)
-                end
-
-                if !isnothing(mask)
-                    x = x .* mask
-                end
-
-                
-                true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
-                pred_freq, pred_fft = compute_temporal_frequency(x)
-                pred_fft = pred_fft[:, num_test_trajectories]
-
-                plot(true_freq, true_fft .* true_freq .* true_freq, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
-                plot!(pred_freq, pred_fft .* pred_fft .* pred_freq, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
-                
-                frequency_save_path = @sprintf("output/ode_frequency_%i.png", epoch)
-                savefig(frequency_save_path)
-
-
-
-                num_channels = size(x, 3)
-
-                for i = 1:num_test_trajectories
-                    mean_pathwise_MSE, mean_mean_MSE = compute_RMSE(
-                        testset[:, :, :, :, i:i], x[:, :, :, :, i], mask,
+                if !isnothing(model_save_dir) && pathwise_MSE < best_loss
+                    save_checkpoint(
+                        ps=ps, 
+                        st=st,
+                        opt_st=opt_state,
+                        output_dir=model_save_dir,
+                        epoch=epoch
                     )
 
-                    pathwise_MSE += mean_pathwise_MSE
-                    mean_MSE += mean_mean_MSE
+                    best_loss = pathwise_MSE
+
+                    early_stop_counter = 0
 
                 end
-                
-                x = x[:, :, 4, :, 1]
-                x_true = x_true[:, :, 4, :, 1]
-                
-                save_path = @sprintf("output/ode_SI_%i.gif", epoch)
-                
-                preds_to_save = (x_true, x, x-x_true)
-                create_gif(preds_to_save, save_path, ["True", "Pred", "Error"])
 
-                println("MSE (ODE): ", pathwise_MSE)
+                early_stop_counter += 1
+
+                if early_stop_counter > early_stop_patience
+                    println("Early stopping at epoch: ", epoch)
+                    println("Best loss: ", best_loss)
+                    break
+                end
+
                 
                 CUDA.reclaim()
                 GC.gc()
+            
 
             end
 
