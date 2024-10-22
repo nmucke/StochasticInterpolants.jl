@@ -476,7 +476,7 @@ function AttnParsConvNextUNet(
         push!(
             conv_up_blocks, 
             multiple_conv_next_blocks(
-                in_channels=channels[i] * 2, 
+                in_channels=channels[i],# * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
                 embedding_dims=embedding_dims,
@@ -523,7 +523,6 @@ function (conv_next_unet::AttnParsConvNextUNet)(
     st::NamedTuple
 )# where T <: AbstractFloat
 
-
     x, x_0, pars, t = x
 
     H, W, C, len_history, B = size(x_0)
@@ -537,13 +536,7 @@ function (conv_next_unet::AttnParsConvNextUNet)(
 
     t_emb = pars_cat(t_emb, pars; dims=1)
 
-    # x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
-    # @set! st.conv_in = new_st
-    # x_0, new_st = conv_next_unet.init_conv_in(x_0, ps.init_conv_in, st.init_conv_in)
-    # @set! st.init_conv_in = new_st
-
     x = cat(x, x_0; dims=3)
-
 
     x, new_st = conv_next_unet.conv_in(x, ps.conv_in, st.conv_in)
     @set! st.conv_in = new_st
@@ -595,8 +588,8 @@ function (conv_next_unet::AttnParsConvNextUNet)(
         )
         @set! st.up_blocks[layer_name] = new_st
 
-
-        x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+        # x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+        x = x + skips[end-i+1]
               
         x, new_st = conv_next_unet.conv_up_blocks[i](
             (x, t_emb), ps.conv_up_blocks[layer_name], st.conv_up_blocks[layer_name]
@@ -610,11 +603,8 @@ function (conv_next_unet::AttnParsConvNextUNet)(
         
     end
 
-
-
     x, new_st = conv_next_unet.conv_out(x, ps.conv_out, st.conv_out)
     @set! st.conv_out = new_st
-
 
     return x, st
 end

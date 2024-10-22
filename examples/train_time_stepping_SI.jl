@@ -30,12 +30,12 @@ dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "transonic_cylinder_flow";
+test_case = "turbulence_in_periodic_box";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_interpolation";
+test_args = "pars_low";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -84,7 +84,7 @@ batch_size = 4;
 learning_rate = T(1e-4);
 weight_decay = T(1e-8);
 num_epochs = 100;
-channels = [16, 32, 64, 128];
+channels = [8, 16, 32, 64]; #[16, 32, 64, 128];
 if test_case == "transonic_cylinder_flow"
     attention_type = "linear"; # "linear" or "standard" or "DiT"
     use_attention_in_layer = [true, true, true, true]
@@ -92,10 +92,11 @@ if test_case == "transonic_cylinder_flow"
     num_heads = 4;
     padding = "constant";    
 elseif test_case == "turbulence_in_periodic_box"
-    attention_type = "DiT"; # "linear" or "standard" or "DiT"
-    use_attention_in_layer = [false, false, false, false];
-    attention_embedding_dims = 256
-    num_heads = 8;
+    attention_type = "standard"; # "linear" or "standard" or "DiT"
+    # use_attention_in_layer = [false, false, false, false];
+    use_attention_in_layer = [true, true, true, true]
+    attention_embedding_dims = 32 #256
+    num_heads = 4 #8
     padding = "periodic";
 end;
 projection = nothing #project_onto_divergence_free;
@@ -148,7 +149,7 @@ opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
 opt_state = Optimisers.setup(opt, ps);
 
 ##### Load checkpoint #####
-continue_training = true;
+continue_training = false;
 if continue_training
     if test_case == "transonic_cylinder_flow"
         best_model = "checkpoint_epoch_18"
