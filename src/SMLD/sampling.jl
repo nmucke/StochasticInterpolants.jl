@@ -24,7 +24,7 @@ using LuxCUDA
     Samples from the SMLD model using the Euler-Maruyama method
 """
 function euler_maruyama_sampler(
-    model::UNet,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
@@ -61,7 +61,7 @@ end
 
 
 function smld_sde_sampler(
-    model::UNet,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,
@@ -105,7 +105,7 @@ end
 
 
 function smld_ode_sampler(
-    model::UNet,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     rng::AbstractRNG,

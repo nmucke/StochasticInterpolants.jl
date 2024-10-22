@@ -12,22 +12,29 @@ module StochasticInterpolants
 # using Setfield
 # using LuxCUDA
 # using Boltz
-
+using Infiltrator
 
 ##### Layers #####
 include("neural_network_layers/conv_next.jl")
 include("neural_network_layers/embeddings.jl")
 include("neural_network_layers/transformer.jl")
-include("neural_network_layers/conv.jl")
+# include("neural_network_layers/conv.jl")
+include("neural_network_layers/autoencoder.jl")
+include("neural_network_layers/diffusion_transformer.jl")
 
+export transform_to_nothing
+export LinearMultiHeadSelfAttention
+export LinearSpatialAttention
 export MultiHeadSelfAttention
 export residual_block
 export conv_next_block
+export conv_next_block_no_pars
 # export ConvNextDownBlock
 # export ConvNextUpBlock
-export UNet
-export ConditionalUNet
-export UpBlock, DownBlock
+export multiple_conv_next_blocks
+# export UNet
+# export ConditionalUNet
+# export UpBlock, DownBlock
 export sinusoidal_embedding
 export modulate
 export patchify
@@ -44,6 +51,17 @@ export parameter_diffusion_transformer_block
 export SpatialAttention
 export DitParsConvNextUNet
 export AttnParsConvNextUNet
+export conv_next_block_no_pars
+
+export MultipleBlocks
+export DownBlock
+export UpBlock
+export Encoder
+export VariationalEncoder
+export Decoder
+export Autoencoder
+export VariationalAutoencoder
+export VAE_wrapper
 
 
 include("unet_transformer.jl")
@@ -55,8 +73,9 @@ export dit_up_block
 include("SI/diffusion.jl")
 include("SI/interpolants.jl")
 include("SI/models.jl")
-include("SI/conditional_models.jl")
+# include("SI/conditional_models.jl")
 include("SI/forecasting_models.jl")
+include("SI/physics_informed_models.jl")
 include("SI/sampling.jl")
 include("SI/loss.jl")
 include("SI/training.jl")
@@ -65,9 +84,11 @@ include("SI/time_stepping.jl")
 
 # Models
 export StochasticInterpolantModel
-export ConditionalStochasticInterpolant
+# export ConditionalStochasticInterpolant
 export FollmerStochasticInterpolant
+export LatentFollmerStochasticInterpolant
 export DataDependentCouplingStochasticInterpolant
+export PhysicsInformedStochasticInterpolant
 
 # Sampling
 export sde_sampler
@@ -88,6 +109,7 @@ export Interpolant
 # Loss
 export get_loss
 export get_forecasting_loss
+export get_physics_forecasting_loss
 
 # Training
 export train_stochastic_interpolant
@@ -104,6 +126,7 @@ include("checkpoint_utils.jl")
 include("data_utils.jl")
 include("preprocessing_utils.jl")
 include("testing_utils.jl")
+include("projections.jl")
 
 # Plotting
 export create_gif
@@ -114,8 +137,10 @@ export load_checkpoint
 
 # Data
 export load_transonic_cylinder_flow_data
-export load_isotropic_turbulence_data
-export prepare_data
+export load_incompressible_flow_data
+export load_turbulence_in_periodic_box_data
+export prepare_data_for_time_stepping
+export load_test_case_data
 
 # Preprocessing
 export StandardizeData
@@ -123,10 +148,18 @@ export NormalizePars
 
 # Testing
 export compute_RMSE
+export compute_energy_spectra
 export compute_spatial_frequency
 export compute_temporal_frequency
 export compare_sde_pred_with_true
 export compare_ode_pred_with_true
+export compute_total_energy
+
+# Projections
+export divfunc
+export gradfunc
+export laplacefunc
+export project_onto_divergence_free
 
 
 ##### Training #####

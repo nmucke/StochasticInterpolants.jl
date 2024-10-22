@@ -173,7 +173,7 @@ end
 
 function ode_sampler(
     x_0::AbstractArray,
-    model::ConditionalUNet,
+    model,
     ps::NamedTuple,
     st::NamedTuple,
     num_steps::Int,
@@ -258,9 +258,9 @@ function SDE_heun(
 )
 
     num_steps = length(timesteps)
-    dt = Float32(timesteps[2] - timesteps[1]) |> dev
 
     for i = 1:(num_steps-1)
+        dt = Float32(timesteps[i+1] - timesteps[i]) |> dev
 
         # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
         t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
@@ -281,6 +281,42 @@ function SDE_heun(
         diffusion_corrector = 0.5f0 * (diffusion_term(t, x, pars, ps, st) .+ diffusion_term(t .+ dt, predictor, pars, ps, st))
 
         x = x .+ drift_corrector .* dt + diffusion_corrector .* dW
+
+    end
+
+    return x
+end
+
+function SDE_euler_maruyama(
+    drift_term::Function,
+    diffusion_term::Function,
+    x::AbstractArray,
+    pars::AbstractArray,
+    timesteps::AbstractArray,
+    ps::NamedTuple,
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+
+    num_steps = length(timesteps)
+
+    for i = 1:(num_steps-1)
+        dt = Float32(timesteps[i+1] - timesteps[i]) |> dev
+
+        # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
+        t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
+        # t_diffusion = t_drift#timesteps[i:i]#repeat(t_drift, size(x)[1:3]...)   
+
+        # z = randn(rng, size(x)) |> dev
+        z = randn!(rng, similar(x, size(x)))
+        dW = sqrt(dt) .* z
+        
+        # Predictor from Euler step
+        drift, st = drift_term(t, x, pars, ps, st)
+        diffusion = diffusion_term(t, x, pars, ps, st) 
+
+        x = x .+ drift .* dt + diffusion .* dW
 
     end
 
@@ -333,8 +369,8 @@ function SDE_runge_kutta(
         F3, st = drift_term(t3_drift, X3, pars, ps, st)
         G3 = diffusion_term(t3_diffusion, X3, pars, ps, st)
 
-        drift_t = (F0 .+ 2 .* F1 .+ 2 .* F2 .+ F3) ./ 6 .* dt
-        diffusion_t = (G0 .+ 2 .* G1 .+ 2 .* G2 .+ G3) ./ 6 .* dW
+        drift_t = (F0 .+ 2f0 .* F1 .+ 2f0 .* F2 .+ F3) ./ 6f0 .* dt
+        diffusion_t = (G0 .+ 2f0 .* G1 .+ 2f0 .* G2 .+ G3) ./ 6f0 .* dW
 
         x = x .+ drift_t .+ diffusion_t
 
@@ -358,9 +394,21 @@ function forecasting_sde_sampler(
 
     # define time span
     timesteps = LinRange(0.0f0, 1.0f0, num_steps)
+    # timesteps = sqrt.(timesteps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
-    x = x_0
+
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        (H, W, C, len_history, batch_size) = size(x_0)
+        (L_H, L_W, L_C) = model.autoencoder.latent_dimensions
+
+        x_0 = reshape(x_0, H, W, C, len_history* batch_size)
+        (x_0, _) = model.autoencoder.encode(x_0)
+        x_0 = reshape(x_0, L_H, L_W, L_C, len_history, batch_size)
+    end
+
+    x = x_0[:, :, :, end, :]
+
 
     # Initial step
     z = randn!(rng, similar(x, size(x)))
@@ -368,16 +416,25 @@ function forecasting_sde_sampler(
 
     t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1]) |> dev 
 
-    vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
+
+    if typeof(model) == PhysicsInformedStochasticInterpolant
+        phys_vel_t = model.physics_velocity((x, x_0, pars, t))
+    else
+        phys_vel_t = nothing
+    end
+    
+    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true, phys_vel=phys_vel_t)
 
     # Initial step
-    x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
+    # x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
+    x = x + vel_t .* dt .+ model.gamma(t) .* dW
 
     # Remaining steps
-    drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st)
+    drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; phys_vel=phys_vel_t)
     diffusion_term(t, x, pars, ps, st) = model.diffusion_term(t, x, x_0, pars, ps, st)
     # x = SDE_runge_kutta(
-    x = SDE_heun(
+    x = SDE_euler_maruyama(
+    # x = SDE_heun(
         drift_term,
         diffusion_term,
         x,
@@ -391,13 +448,23 @@ function forecasting_sde_sampler(
 
     # Final step
     # z = randn(rng, size(x_0)) |> dev
-    z = randn!(rng, similar(x_0, size(x_0)))
+    z = randn!(rng, similar(x, size(x)))
+
+    dt = Float32.(timesteps[end] - timesteps[end-1])
     
     t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
-    vel_t, st = model.velocity((x, x_0, pars, t), ps, st)
+    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
 
-    t = repeat(t, size(x_0)[1:3]...)
+    t = repeat(t, size(x)[1:3]...)
     x = x + vel_t .* dt .+ model.gamma(t) .* sqrt.(dt) .* z   
+
+    if !isnothing(model.projection)
+        x = model.projection(x, dev)
+    end
+
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        x = model.autoencoder.decode(x)
+    end
 
     return x
 
@@ -415,11 +482,13 @@ function ODE_runge_kutta(
 )
 
     num_steps = length(timesteps)
-    dt = Float32(timesteps[2] - timesteps[1]) |> dev
+    @allowscalar dt = Float32(timesteps[2] - timesteps[1])
 
     for i = 1:(num_steps-1)
 
-        t_drift = fill!(similar(x, 1), timesteps[i])
+        # t_drift = fill!(similar(x, 1), timesteps[i])
+        # t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
+        @allowscalar t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
 
         X0 = x
         t0_drift = t_drift
@@ -461,6 +530,7 @@ function ODE_heun(
 
     for i = 1:(num_steps-1)
 
+        # t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
         # @allowscalar t_drift = fill!(similar(x, 1), timesteps[i])
         @allowscalar t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
 
@@ -491,22 +561,41 @@ function forecasting_ode_sampler(
     # define time span
     timesteps = LinRange(0.0f0, 1.0f0, num_steps) |> dev
 
+
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        (H, W, C, len_history, batch_size) = size(x_0)
+        (L_H, L_W, L_C) = model.autoencoder.latent_dimensions
+
+        x_0 = reshape(x_0, H, W, C, len_history * batch_size)
+        (x_0, _) = model.autoencoder.encode(x_0)
+        x_0 = reshape(x_0, L_H, L_W, L_C, len_history, batch_size)
+    end
+
+
     x_0 = x_0 |> dev
 
     # drift_term(t, x, pars, ps, st) = model.drift_term((x, x_0, pars, t), ps, st)
 
 
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
-    # x = ODE_runge_kutta(
-    x = ODE_heun(
+    x = ODE_runge_kutta(
+    # x = ODE_heun(
         drift_term,
-        x_0,
+        x_0[:, :, :, end, :],
         pars,
         timesteps,
         ps,
         st,
         dev
     )
+
+    if !isnothing(model.projection)
+        x = model.projection(x)
+    end
+
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        x = model.autoencoder.decode(x)
+    end
 
     return x
 

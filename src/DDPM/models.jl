@@ -27,7 +27,7 @@ Creates a Denoising Diffusion Probabilistic Model (DDPM) with a UNet architectur
 struct DenoisingDiffusionProbabilisticModel <: Lux.AbstractExplicitContainerLayer{
     (:unet, )
 }
-    unet::UNet
+    unet::Lux.AbstractExplicitLayer
     noise_scheduling::NoiseScheduling
     sample::Function
     timesteps::Int
