@@ -272,9 +272,9 @@ function compare_sde_pred_with_true(
     energy_pred = compute_total_energy(x)
 
     plot(energy_true, color=:blue, label="True", linewidth=3)
-    plot!(energy_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
+    plot!(energy_pred, color=:red, linewidth=3, alpha=0.25)
     plot!(mean(energy_pred, dims=2), color=:red, label="Pred", linewidth=5)
-    energy_save_path = gif_save_path * "_energy.png"
+    energy_save_path = gif_save_path * "_energy.pdf"
     savefig(energy_save_path)
 
     # Divergence
@@ -284,32 +284,32 @@ function compare_sde_pred_with_true(
     plot(divergence_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
     plot!(mean(divergence_pred, dims=2), color=:red, label="Pred", linewidth=5)
     plot!(divergence_true, color=:blue, label="True", linewidth=2)
-    divergence_save_path = gif_save_path * "_divergence.png"
+    divergence_save_path = gif_save_path * "_divergence.pdf"
     savefig(divergence_save_path)
 
     # Energy spectra
-    energy_spectra_true = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
-    energy_spectra_pred, K_bins = compute_energy_spectra(x[:, :, :, end, :])
+    # energy_spectra_true = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
+    # energy_spectra_pred, K_bins = compute_energy_spectra(x[:, :, :, end, 1:1])
 
-    plot(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
-    plot!(K_bins, energy_spectra_pred, color=:red, label="Pred", linewidth=3, xaxis=:log, yaxis=:log, alpha=0.25)
-    plot!(K_bins, mean(energy_spectra_pred, dims=2), color=:red, label="Pred", linewidth=5, xaxis=:log, yaxis=:log)
-    energy_spectra_save_path = gif_save_path * "_energy_spectra.png"
-    savefig(energy_spectra_save_path)
+    # plot(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
+    # plot!(K_bins, energy_spectra_pred, color=:red, linewidth=3, xaxis=:log, yaxis=:log, alpha=0.25)
+    # plot!(K_bins, mean(energy_spectra_pred, dims=2), color=:red, label="Pred", linewidth=5, xaxis=:log, yaxis=:log)
+    # energy_spectra_save_path = gif_save_path * "_energy_spectra.pdf"
+    # savefig(energy_spectra_save_path)
 
-    # true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
-    # pred_freq, pred_fft = compute_temporal_frequency(x)
-    # pred_fft_mean = mean(pred_fft, dims=2)
-    # pred_fft_min = minimum(pred_fft, dims=2)
-    # pred_fft_max = maximum(pred_fft, dims=2)
+    true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
+    pred_freq, pred_fft = compute_temporal_frequency(x)
+    pred_fft_mean = mean(pred_fft, dims=2)
+    pred_fft_min = minimum(pred_fft, dims=2)
+    pred_fft_max = maximum(pred_fft, dims=2)
 
-    # plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
-    # plot!(pred_freq, pred_fft_mean .* pred_fft_mean .* pred_fft_mean, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
-    # plot!(pred_freq, pred_fft_min .* pred_fft_min .* pred_fft_min, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
-    # plot!(pred_freq, pred_fft_max .* pred_fft_max .* pred_fft_max, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
+    plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
+    plot!(pred_freq, pred_fft_mean .* pred_fft_mean .* pred_fft_mean, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
+    plot!(pred_freq, pred_fft_min .* pred_fft_min .* pred_fft_min, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
+    plot!(pred_freq, pred_fft_max .* pred_fft_max .* pred_fft_max, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
 
-    # frequency_save_path = gif_save_path * "_frequency.png"
-    # savefig(frequency_save_path)
+    frequency_save_path = gif_save_path * "_frequency.pdf"
+    savefig(frequency_save_path)
 
 
     pathwise_MSE /= num_test_trajectories
@@ -324,6 +324,49 @@ function compare_sde_pred_with_true(
     x_true_plot = sqrt.(x_true[:, :, 1, :, num_test_trajectories].^2 + x_true[:, :, 2, :, num_test_trajectories].^2)
     x_mean_plot = sqrt.(x_mean[:, :, 1, :].^2 + x_mean[:, :, 2, :].^2)
     x_plot = sqrt.(x[:, :, 1, :, :].^2 + x[:, :, 2, :, :].^2)
+    x_std_plot = std(x_plot, dims=4)
+    # x_true_plot = x_true[:, :, 4, :, num_test_trajectories]
+    # x_mean_plot = x_mean[:, :, 4, :]
+    # x_plot = x[:, :, 4, :, :]
+    # x_std_plot = std(x_plot, dims=4)
+    
+
+    # inidividual_snapshot_save_path = gif_save_path * "/individual_snapshots/"
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "1_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 2], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "2_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 3], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "3_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_std_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true)
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "std_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_true_plot[:, :, i], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "true_$i.pdf")
+    # end
 
     preds_to_save = (
         x_true_plot, 
@@ -416,7 +459,7 @@ function compare_ode_pred_with_true(
     plot(energy_true, color=:blue, label="True", linewidth=3)
     plot!(energy_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
     plot!(mean(energy_pred, dims=2), color=:red, label="Pred", linewidth=5)
-    energy_save_path = gif_save_path * "_energy.png"
+    energy_save_path = gif_save_path * "_energy.pdf"
     savefig(energy_save_path)
 
     # Divergence
@@ -426,7 +469,7 @@ function compare_ode_pred_with_true(
     plot(divergence_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
     plot!(mean(divergence_pred, dims=2), color=:red, label="Pred", linewidth=5)
     plot!(divergence_true, color=:blue, label="True", linewidth=2)
-    divergence_save_path = gif_save_path * "_divergence.png"
+    divergence_save_path = gif_save_path * "_divergence.pdf"
     savefig(divergence_save_path)
 
     # Energy spectra
@@ -436,7 +479,7 @@ function compare_ode_pred_with_true(
     plot(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
     plot!(K_bins, energy_spectra_pred, color=:red, label="Pred", linewidth=3, xaxis=:log, yaxis=:log, alpha=0.25)
     plot!(K_bins, mean(energy_spectra_pred, dims=2), color=:red, label="Pred", linewidth=5, xaxis=:log, yaxis=:log)
-    energy_spectra_save_path = gif_save_path * "_energy_spectra.png"
+    energy_spectra_save_path = gif_save_path * "_energy_spectra.pdf"
     savefig(energy_spectra_save_path)
 
     
@@ -447,7 +490,7 @@ function compare_ode_pred_with_true(
     # plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
     # plot!(pred_freq, pred_fft .* pred_fft .* pred_fft, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
     
-    # frequency_save_path = @sprintf("output/ode_frequency_%i.png", epoch)
+    # frequency_save_path = @sprintf("output/ode_frequency_%i.pdf", epoch)
     # savefig(frequency_save_path)
 
     

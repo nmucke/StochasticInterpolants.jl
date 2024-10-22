@@ -17,22 +17,18 @@ with_mask: false
 
 # Training and test IDs
 training_args:
-  ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, ]
-  # ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] 
-  #, 29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 
-        # 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]
+  ids: [1, 2] #, 3, 4, 5, 6, 7, 8, 9]
   time_step_info:
-    start_time: 150
-    num_steps: 450
+    start_time: 500
+    num_steps: 10
     skip_steps: 4
 
 test_args:
   pars_low:
-    # ids: [16, 17, 18, 19, 20]
     ids: [10]
     time_step_info:
-      start_time: 400
-      num_steps: 100
+      start_time: 500 # 900
+      num_steps: 50
       skip_steps: 4
 
 normalize_data: false

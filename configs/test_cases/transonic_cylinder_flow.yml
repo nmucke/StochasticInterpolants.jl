@@ -24,7 +24,7 @@ training_args:
   # ids: [10, 11, 12, 13, 14, 15, 16, 17, 18]
   time_step_info:
     start_time: 1
-    num_steps: 150
+    num_steps: 500
     skip_steps: 2
 
 test_args:
@@ -36,7 +36,7 @@ test_args:
       skip_steps: 2
 
   pars_interpolation:
-    ids: [16, 17, 18]
+    ids: [16] #, 17, 18]
     time_step_info:
       start_time: 500
       num_steps: 60
@@ -51,6 +51,7 @@ test_args:
       skip_steps: 2
 
 
+normalize_data: true
 
 
 # Normalization parameters

@@ -94,7 +94,7 @@ function compute_multiple_ODE_steps(;
     for i in ProgressBar(model.velocity.len_history:(num_physical_steps - 1))
 
 
-        x_n = forecasting_ode_sampler(sol[:, :, :, (i-model.velocity.len_history+1):i, :], parameters, model, ps, st, num_generator_steps, dev)
+        x_n = forecasting_ode_sampler(sol[:, :, :, (i-model.velocity.len_history+1):i, :] |> dev, parameters, model, ps, st, num_generator_steps, dev)
         
         if !isnothing(mask)
             x_n = x_n .* mask

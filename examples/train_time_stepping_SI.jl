@@ -10,6 +10,9 @@ using LuxCUDA
 using Optimisers
 using FileIO
 
+CUDA.reclaim()
+GC.gc()
+
 # For running on CPU.
 # Consider reducing the sizes of DNS, LES, and CNN layers if
 # you want to test run on a laptop.
@@ -27,158 +30,44 @@ dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "turbulence_in_periodic_box";
+test_case = "transonic_cylinder_flow";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_low";
+test_args = "pars_interpolation";
 
-# Load the test case configuration
-test_case_config = YAML.load_file("configs/test_cases/$test_case.yml");
+trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
+    test_case, 
+    test_args,
+);
+mask = mask |> dev;
 
-# Get data path
-data_folder = test_case_config["data_folder"];
+num_train = size(trainset, 5);
+num_steps = size(trainset, 4);
+H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
-# Get dimensions of state and parameter spaces
-H = test_case_config["state_dimensions"]["height"];
-W = test_case_config["state_dimensions"]["width"];
-C = test_case_config["state_dimensions"]["channels"];
-if !isnothing(test_case_config["parameter_dimensions"])
-    pars_dim = length(test_case_config["parameter_dimensions"]);
-    num_pars = pars_dim
-else
-    pars_dim = 1;
-    num_pars = 0;
-end;
-
-# Load mask if it exists
-if test_case_config["with_mask"]
-    mask = npzread("$data_folder/sim_000000/obstacle_mask.npz")["arr_0"];
-    mask = permutedims(mask, (2, 1)) |> dev;
-else
-    mask = ones(H, W, C) |> dev;
-end;
-
-
-# Number of training samples
-num_train = length(test_case_config["training_args"]["ids"]);
-
-# Time step information
-start_time = test_case_config["training_args"]["time_step_info"]["start_time"];
-num_steps = test_case_config["training_args"]["time_step_info"]["num_steps"];
-skip_steps = test_case_config["training_args"]["time_step_info"]["skip_steps"];
-
-test_start_time = test_case_config["test_args"][test_args]["time_step_info"]["start_time"];
-test_num_steps = test_case_config["test_args"][test_args]["time_step_info"]["num_steps"];
-test_skip_steps = test_case_config["test_args"][test_args]["time_step_info"]["skip_steps"];
-
-
-if test_case == "transonic_cylinder_flow"
-    # Load the training data
-    trainset, trainset_pars = load_transonic_cylinder_flow_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["training_args"]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(start_time, num_steps, skip_steps)
-    );
-
-    # Load the test data
-    testset, testset_pars = load_transonic_cylinder_flow_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["test_args"][test_args]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(test_start_time, test_num_steps, test_skip_steps)
-    );
-elseif test_case == "incompressible_flow"
-    # Load the training data
-    trainset, trainset_pars = load_incompressible_flow_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["training_args"]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(start_time, num_steps, skip_steps)
-    );
-
-    # Load the test data
-    testset, testset_pars = load_incompressible_flow_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["test_args"][test_args]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(test_start_time, test_num_steps, test_skip_steps)
-    );
-
-elseif test_case == "turbulence_in_periodic_box"
-    # Load the training data
-    trainset, trainset_pars = load_turbulence_in_periodic_box_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["training_args"]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(start_time, num_steps, skip_steps)
-    );
-
-    # Load the test data
-    testset, testset_pars = load_turbulence_in_periodic_box_data(
-        data_folder=data_folder,
-        data_ids=test_case_config["test_args"][test_args]["ids"],
-        state_dims=(H, W, C),
-        num_pars=pars_dim,
-        time_step_info=(test_start_time, test_num_steps, test_skip_steps)
-    );
-else
-    error("Invalid test case")
-end;
-
-trainset = convert(Array{T}, trainset);
-trainset_pars = convert(Array{T}, trainset_pars);
-testset = convert(Array{T}, testset);
-
-if test_case_config["normalize_data"]
-    # Normalize the data
-    normalize_data = StandardizeData(
-        test_case_config["norm_mean"], 
-        test_case_config["norm_std"],
-    );
-    trainset = normalize_data.transform(trainset);
-    testset = normalize_data.transform(testset);
-
-    # Normalize the parameters
-    normalize_pars = NormalizePars(
-        test_case_config["pars_min"], 
-        test_case_config["pars_max"]
-    );
-    trainset_pars = normalize_pars.transform(trainset_pars);
-    testset_pars = normalize_pars.transform(testset_pars);
-else
-    normalize_data = nothing;
-end;
-
-# for i = 1:size(trainset, 5)
-#     for j = 1:size(trainset, 4)
-#         trainset[:, :, :, j, i] = project_onto_divergence_free(trainset[:, :, :, j, i], cpu_device());
-#     end;
-# end;
 
 # Create a gif
-x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
-x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
-x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
-x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
-x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
-x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
-x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
-x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
+# x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
+# x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
+# x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
+# x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
+# x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
+# x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
+# x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
+# x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
 
-create_gif(
-    (x1, x2, x3, x4, x5, x6, x7, x8), 
-    "HF.gif", 
-    ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
-)
+# create_gif(
+#     (x1, x2, x3, x4, x5, x6, x7, x8), 
+#     "HF.gif", 
+#     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+# )
 
+
+
+##### Hyperparameters #####
+# model_config = YAML.load_file("configs/neural_networks/$test_case.yml");
 
 len_history = 2;
 
@@ -189,17 +78,26 @@ trainset_init_distribution, trainset_target_distribution, trainset_pars_distribu
 );
 
 
-##### Hyperparameters #####
-embedding_dims = 128;
-batch_size = 8;
+
+embedding_dims = 256;
+batch_size = 4;
 learning_rate = T(1e-4);
 weight_decay = T(1e-8);
-num_epochs = 4000;
+num_epochs = 100;
 channels = [16, 32, 64, 128];
-attention_type = "DiT"; # "linear" or "standard" or "DiT"
-use_attention_in_layer = [false, false, false, false]; # [true, true, true, true];
-attention_embedding_dims = 64;
-num_heads = 4;
+if test_case == "transonic_cylinder_flow"
+    attention_type = "linear"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [true, true, true, true]
+    attention_embedding_dims = 32;
+    num_heads = 4;
+    padding = "constant";    
+elseif test_case == "turbulence_in_periodic_box"
+    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [false, false, false, false];
+    attention_embedding_dims = 256
+    num_heads = 8;
+    padding = "periodic";
+end;
 projection = nothing #project_onto_divergence_free;
 
 ##### Forecasting SI model #####
@@ -214,34 +112,24 @@ velocity = AttnParsConvNextUNet(
     len_history=len_history,
     attention_type=attention_type,
     use_attention_in_layer=use_attention_in_layer,
-    padding="periodic",
+    padding=padding,
     attention_embedding_dims=attention_embedding_dims,
     num_heads=num_heads,
 );
 
 
 # Define interpolant and diffusion coefficients
-diffusion_multiplier = 0.1f0;
+diffusion_multiplier = 0.5f0;
 
 gamma = t -> diffusion_multiplier.* (1f0 .- t);
 dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
 diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
-
-# gamma = t -> diffusion_multiplier.* sqrt.(2f0 .* t .* (1f0 .- t));
-# dgamma_dt = t -> diffusion_multiplier .* (1f0 .- 2f0 .* t) ./ sqrt.(-2f0 .* (t .- 1f0) .* t);
-# diffusion_coefficient = t -> gamma(t); #diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
 
 alpha = t -> 1f0 .- t; 
 dalpha_dt = t -> -1f0;
 
 beta = t -> t.^2;
 dbeta_dt = t -> 2f0 .* t;
-
-# alpha = t -> cos.(Float32(pi)/2f0 .* t); 
-# dalpha_dt = t -> -Float32(pi)/2f0 .*sin.(Float32(pi)/2f0 .* t);
-
-# beta = t -> sin.(Float32(pi)/2f0 .* t);
-# dbeta_dt = t -> Float32(pi)/2f0 .*cos.(Float32(pi)/2f0 .* t);
 
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
@@ -253,7 +141,7 @@ model = FollmerStochasticInterpolant(
 );
 ps, st = Lux.setup(rng, model) .|> dev;
 
-model_save_dir = "trained_models/forecasting_model";
+model_save_dir = "trained_models/$test_case";
 
 ##### Optimizer #####
 opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
@@ -263,14 +151,14 @@ opt_state = Optimisers.setup(opt, ps);
 continue_training = true;
 if continue_training
     if test_case == "transonic_cylinder_flow"
-        best_model = "checkpoint_transonic_best"
-        ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
-    elseif test_case == "incompressible_flow"   
+        best_model = "checkpoint_epoch_18"
+        ps, st, opt_state = load_checkpoint("trained_models/transonic_cylinder_flow/$best_model.bson") .|> dev;
+    elseif test_case == "incompressible_flow"
         best_model = "best_incompressible_model"
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
     elseif test_case == "turbulence_in_periodic_box"
-        continue_epoch = 250;
-        ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/checkpoint_epoch_$continue_epoch.bson") .|> dev;
+        best_model = "checkpoint_epoch_10"
+        ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
     end;
 end;
     
@@ -285,7 +173,7 @@ ps, st = train_stochastic_interpolant(
     trainset_pars_distribution=trainset_pars_distribution,
     testset=testset,
     testset_pars=testset_pars,
-    num_test_paths=10,
+    num_test_paths=4,
     model_save_dir=model_save_dir,
     num_epochs=num_epochs,
     batch_size=batch_size,
@@ -294,6 +182,162 @@ ps, st = train_stochastic_interpolant(
     rng=rng,
     dev=dev
 );
+
+
+CUDA.reclaim()
+GC.gc()
+
+# Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
+test_case = "transonic_cylinder_flow";
+
+# Which type of testing to perform
+# options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
+# options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
+test_args = "pars_interpolation";
+
+trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
+    test_case, 
+    test_args,
+);
+mask = mask |> dev;
+
+num_train = size(trainset, 5);
+num_steps = size(trainset, 4);
+H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
+
+
+##### Hyperparameters #####
+# model_config = YAML.load_file("configs/neural_networks/$test_case.yml");
+
+len_history = 2;
+
+trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution = prepare_data_for_time_stepping(
+    trainset,
+    trainset_pars;
+    len_history=len_history
+);
+
+embedding_dims = 256;
+batch_size = 4;
+learning_rate = T(1e-4);
+weight_decay = T(1e-8);
+num_epochs = 500;
+channels = [16, 32, 64, 128];
+if test_case == "transonic_cylinder_flow"
+    attention_type = "linear"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [true, true, true, true]
+    attention_embedding_dims = 32;
+    num_heads = 4;
+    padding = "constant";    
+elseif test_case == "turbulence_in_periodic_box"
+    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [false, false, false, false];
+    attention_embedding_dims = 256
+    num_heads = 8;
+    padding = "periodic";
+end;
+projection = nothing #project_onto_divergence_free;
+
+##### Forecasting SI model #####
+# Define the velocity model
+# velocity = DitParsConvNextUNet(
+velocity = AttnParsConvNextUNet(
+    (H, W); 
+    in_channels=C, 
+    channels=channels, 
+    embedding_dims=embedding_dims, 
+    pars_dim=num_pars,
+    len_history=len_history,
+    attention_type=attention_type,
+    use_attention_in_layer=use_attention_in_layer,
+    padding=padding,
+    attention_embedding_dims=attention_embedding_dims,
+    num_heads=num_heads,
+);
+
+
+# Define interpolant and diffusion coefficients
+diffusion_multiplier = 0.5f0;
+
+gamma = t -> diffusion_multiplier.* (1f0 .- t);
+dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+
+alpha = t -> 1f0 .- t; 
+dalpha_dt = t -> -1f0;
+
+beta = t -> t.^2;
+dbeta_dt = t -> 2f0 .* t;
+
+# Initialise the SI model
+model = FollmerStochasticInterpolant(
+    velocity; 
+    interpolant=Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
+    diffusion_coefficient=diffusion_coefficient,
+    projection=projection,
+    dev=dev
+);
+ps, st = Lux.setup(rng, model) .|> dev;
+
+model_save_dir =  "trained_models/$test_case";
+
+##### Optimizer #####
+opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
+opt_state = Optimisers.setup(opt, ps);
+    
+continue_training = true;
+if continue_training
+    if test_case == "transonic_cylinder_flow"
+        best_model = "checkpoint_epoch_18"
+        ps, st, opt_state = load_checkpoint("trained_models/transonic_cylinder_flow/$best_model.bson") .|> dev;
+    elseif test_case == "incompressible_flow"
+        best_model = "best_incompressible_model"
+        ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
+    elseif test_case == "turbulence_in_periodic_box"
+        best_model = "best_model"
+        ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
+    end;
+end;
+
+##### Train stochastic interpolant #####
+ps, st = train_stochastic_interpolant(
+    model=model,
+    ps=ps,
+    st=st,
+    opt_state=opt_state,
+    trainset_target_distribution=trainset_target_distribution,
+    trainset_init_distribution=trainset_init_distribution,
+    trainset_pars_distribution=trainset_pars_distribution,
+    testset=testset,
+    testset_pars=testset_pars,
+    num_test_paths=4,
+    model_save_dir=model_save_dir,
+    num_epochs=num_epochs,
+    batch_size=batch_size,
+    normalize_data=normalize_data,
+    mask=mask,  
+    rng=rng,
+    dev=dev
+);
+
+
+
+save_checkpoint(
+    ps=ps, 
+    st=st,
+    opt_st=opt_state,
+    output_dir=model_save_dir,
+    epoch=10
+)
+
+
+
+
+
+
+
+
+
 
 
 
@@ -326,7 +370,7 @@ compare_sde_pred_with_true(
     num_test_paths,
     normalize_data,
     mask,
-    25,
+    100,
     gif_save_path,
     rng,
     dev,

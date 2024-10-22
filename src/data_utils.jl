@@ -3,6 +3,7 @@
 using NPZ
 using JSON
 using FileIO
+using YAML
 
 
 function load_npz(data_path::String)
@@ -166,4 +167,132 @@ function prepare_data_for_time_stepping(
     
 
     return trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution
+end
+
+function load_test_case_data(
+    test_case, test_args,
+)
+
+    T = Float32;
+
+    # Load the test case configuration
+    test_case_config = YAML.load_file("configs/test_cases/$test_case.yml");
+
+    # Get dimensions of state and parameter spaces
+    H = test_case_config["state_dimensions"]["height"];
+    W = test_case_config["state_dimensions"]["width"];
+    C = test_case_config["state_dimensions"]["channels"];
+    if !isnothing(test_case_config["parameter_dimensions"])
+        pars_dim = length(test_case_config["parameter_dimensions"]);
+        num_pars = pars_dim
+    else
+        pars_dim = 1;
+        num_pars = 0;
+    end;
+
+    # Get data path
+    data_folder = test_case_config["data_folder"];
+
+    # Time step information
+    start_time = test_case_config["training_args"]["time_step_info"]["start_time"];
+    num_steps = test_case_config["training_args"]["time_step_info"]["num_steps"];
+    skip_steps = test_case_config["training_args"]["time_step_info"]["skip_steps"];
+
+    test_start_time = test_case_config["test_args"][test_args]["time_step_info"]["start_time"];
+    test_num_steps = test_case_config["test_args"][test_args]["time_step_info"]["num_steps"];
+    test_skip_steps = test_case_config["test_args"][test_args]["time_step_info"]["skip_steps"];
+
+
+    if test_case == "transonic_cylinder_flow"
+        # Load the training data
+        trainset, trainset_pars = load_transonic_cylinder_flow_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["training_args"]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(start_time, num_steps, skip_steps)
+        );
+
+        # Load the test data
+        testset, testset_pars = load_transonic_cylinder_flow_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["test_args"][test_args]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+        );
+    elseif test_case == "incompressible_flow"
+        # Load the training data
+        trainset, trainset_pars = load_incompressible_flow_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["training_args"]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(start_time, num_steps, skip_steps)
+        );
+
+        # Load the test data
+        testset, testset_pars = load_incompressible_flow_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["test_args"][test_args]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+        );
+
+    elseif test_case == "turbulence_in_periodic_box"
+        # Load the training data
+        trainset, trainset_pars = load_turbulence_in_periodic_box_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["training_args"]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(start_time, num_steps, skip_steps)
+        );
+
+        # Load the test data
+        testset, testset_pars = load_turbulence_in_periodic_box_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["test_args"][test_args]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+        );
+    else
+        error("Invalid test case")
+    end
+
+    # Load mask if it exists
+    if test_case_config["with_mask"]
+        mask = npzread("$data_folder/sim_000000/obstacle_mask.npz")["arr_0"];
+        mask = permutedims(mask, (2, 1));
+    else
+        mask = ones(H, W, C);
+    end;
+
+    trainset = convert(Array{T}, trainset);
+    trainset_pars = convert(Array{T}, trainset_pars);
+    testset = convert(Array{T}, testset);
+    
+    if test_case_config["normalize_data"]
+        # Normalize the data
+        normalize_data = StandardizeData(
+            test_case_config["norm_mean"], 
+            test_case_config["norm_std"],
+        );
+        trainset = normalize_data.transform(trainset);
+        testset = normalize_data.transform(testset);
+    
+        # Normalize the parameters
+        normalize_pars = NormalizePars(
+            test_case_config["pars_min"], 
+            test_case_config["pars_max"]
+        );
+        trainset_pars = normalize_pars.transform(trainset_pars);
+        testset_pars = normalize_pars.transform(testset_pars);
+    else
+        normalize_data = nothing;
+    end;
+
+    return trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars
 end

@@ -508,30 +508,6 @@ function AttnParsConvNextUNet(
         Conv((1, 1), (channels[end] => in_channels); use_bias=false)
     )
     
-    
-    # @compact(
-    #     ds_conv = Chain(
-    #         get_padding(padding, 3),
-    #         Lux.Conv((7, 7), channels[end]  => channels[end])# , groups=in_channels)
-    #     ),
-    #     conv_net = Chain(
-    #         Lux.InstanceNorm(channels[end]),
-    #         get_padding(padding, 1),
-    #         Lux.Conv((3, 3), (channels[end] => channels[end] * multiplier)),
-    #         NNlib.gelu,
-    #         Lux.InstanceNorm(channels[end] * multiplier),
-    #         get_padding(padding, 1),
-    #         Lux.Conv((3, 3), (channels[end] * multiplier => channels[end])),
-    #     ),
-    #     final = Conv((1, 1), (channels[end] => in_channels); use_bias=false)
-    # ) do x
-    #     h = ds_conv(x)
-    #     h = conv_net(h)
-    #     x = h .+ x
-    #     @return final(x)
-    # end
-
-    
     return AttnParsConvNextUNet(
         conv_in, conv_out, conv_down_blocks, 
         down_blocks, bottleneck1, bottleneck2, conv_up_blocks, 
@@ -961,7 +937,6 @@ function parameter_diffusion_transformer_block(;
 
         pars_embedding = Lux.Chain(
             Lux.Dense(pars_dim => embed_dim),
-            NNlib.gelu,
         ),
         patchify_layer = patchify(
             imsize; 

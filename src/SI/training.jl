@@ -53,23 +53,54 @@ function train_stochastic_interpolant(;
     rng::AbstractRNG,
     dev=gpu_device()
 )
+    cpu_dev = LuxCPUDevice();
+
+    # If the model is a LatentFollmerStochasticInterpolant, we need to encode the data
+    # before training, to train the SI in the latent space.
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        (L_H, L_W, L_C) = model.autoencoder.latent_dimensions
+        (H, W, C, len_history) = size(trainset_init_distribution)[1:4]
+
+        latent_target_distribution = zeros(L_H, L_W, L_C, size(trainset_target_distribution)[end])
+        for i in 1:batch_size:size(trainset_target_distribution)[end]
+            bs = batch_size
+            if i + bs - 1 > size(trainset_target_distribution)[end]
+                bs = size(trainset_target_distribution)[end] - i + 1
+            end
+            x = trainset_target_distribution[:, :, :, i:i+bs-1] |> dev
+            (x, _) = model.autoencoder.encode(x)
+            latent_target_distribution[:, :, :, i:i+bs-1] = x |> cpu_dev
+        end
+        trainset_target_distribution = latent_target_distribution
+
+        latent_init_distribution = zeros(L_H, L_W, L_C, len_history, size(trainset_init_distribution)[end])
+        for i in 1:batch_size:size(trainset_init_distribution)[end]
+            bs = batch_size
+            if i + bs - 1 > size(trainset_target_distribution)[end]
+                bs = size(trainset_target_distribution)[end] - i + 1
+            end
+            x = trainset_init_distribution[:, :, :, :, i:i+bs-1] |> dev
+            x = reshape(x, H, W, C, len_history*bs)
+            (x, _) = model.autoencoder.encode(x)
+            x = reshape(x, L_H, L_W, L_C, len_history, bs)
+            latent_init_distribution[:, :, :, :, i:i+bs-1] = x |> cpu_dev
+        end
+        trainset_init_distribution = latent_init_distribution
+    end
 
     init_learning_rate = 1e-4
     new_learning_rate = init_learning_rate
 
     min_learning_rate = 1e-6
 
-    output_sde = false
-    output_ode = true
+    output_sde = true
+    output_ode = false
 
-    early_stop_patience = 100
+    early_stop_patience = 10
 
-    num_generator_steps = 20
+    num_generator_steps = 75
 
     num_steps = size(testset, 4)
-
-
-    cpu_dev = LuxCPUDevice();
 
     num_target = size(trainset_target_distribution)[end]
 
@@ -96,10 +127,15 @@ function train_stochastic_interpolant(;
             x_1 = trainset_target_distribution[:, :, :, i:i+batch_size-1] |> dev
             x_0 = trainset_init_distribution[:, :, :, :, i:i+batch_size-1] |> dev
             pars = trainset_pars_distribution[:, i:i+batch_size-1] |> dev
+            
+            # @infiltrate
 
-            (loss, st), pb_f = Zygote.pullback(
-                p -> model.loss(x_0, x_1, pars, p, st, rng, dev), ps
+            loss, pb_f = Zygote.pullback(
+                p -> model.loss(x_0, x_1, pars, p, st, rng, dev)[1], ps
             );
+
+            print(loss)
+            error()
 
             running_loss += loss
 
@@ -114,7 +150,7 @@ function train_stochastic_interpolant(;
 
         loss_vec = vcat(loss_vec, running_loss)
 
-        plot(loss_vec, yaxis=:log)
+        plot(loss_vec)#, yaxis=:log)
         savefig("training_loss.png")
         
         if epoch % 1 == 0
@@ -131,7 +167,6 @@ function train_stochastic_interpolant(;
             GC.gc()
 
             st_ = Lux.testmode(st)
-
 
             if output_sde
                 num_test_trajectories = size(testset)[end]

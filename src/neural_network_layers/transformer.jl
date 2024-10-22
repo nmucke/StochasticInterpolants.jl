@@ -156,9 +156,9 @@ function LinearMultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bia
         q = q .* scale
 
         v = permutedims(v, (3, 1, 2, 4)) # (C, H, N, B) -> (N, C, H, B)
-        kt = permutedims(k, (1, 3, 2, 4)) # (C, H, N, B) -> (C, N, H, B)
+        k = permutedims(k, (1, 3, 2, 4)) # (C, H, N, B) -> (C, N, H, B)
         
-        x = batched_mul(kt, v) # (C, N, H, B) * (N, C, H, B) -> (C, C, H, B)
+        x = batched_mul(k, v) # (C, N, H, B) * (N, C, H, B) -> (C, C, H, B)
 
         q = permutedims(q, (3, 1, 2, 4)) # (C, H, N, B) -> (N, C, H, B)
         
@@ -197,13 +197,15 @@ function LinearSpatialAttention(;
         ),
         norm_2 = Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
         conv_out = Lux.Chain(
-            Lux.Dense(embed_dim * num_heads => embed_dim * num_heads),
-            NNlib.gelu,
-            Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
-            Lux.Dropout(dropout_rate),
+            # Lux.Dense(embed_dim * num_heads => embed_dim * num_heads),
             Lux.Dense(embed_dim * num_heads => in_channels),
+            # NNlib.gelu,
+            # Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
+            Lux.LayerNorm((in_channels, imsize[1]*imsize[2])),
+            # Lux.Dropout(dropout_rate),
+            # Lux.Dense(embed_dim * num_heads => in_channels),
         ),
-        skip_conv = Lux.Dense(embed_dim * num_heads => in_channels)
+        # skip_conv = Lux.Dense(embed_dim * num_heads => in_channels)
 
         
     ) do x
@@ -211,21 +213,21 @@ function LinearSpatialAttention(;
 
         x = x .+ position_encoding
 
-        x_skip = x
+        # x_skip = x
 
         x = norm_1(x)
 
         x = attn(x)
 
-        x += x_skip
+        # x += x_skip
 
-        x = norm_2(x)
+        # x = norm_2(x)
 
-        x_skip = x
+        # x_skip = x
 
         x = conv_out(x) # (E * H, Nx*Ny, B) -> (C, Nx*Ny, B)
 
-        x = x + skip_conv(x_skip)
+        # x = x + skip_conv(x_skip)
 
         x = unpatchify(x, imsize, (1, 1), in_channels) # (C, Nx*Ny, B) - > (Nx, Ny, C, B)
 
@@ -287,8 +289,11 @@ function patchify(
 
     @assert (im_width % patch_width == 0) && (im_height % patch_height == 0)
 
-    return Lux.Chain(Lux.Conv(patch_size, in_channels => embed_planes; stride=patch_size),
-        flatten ? _flatten_spatial : identity, norm_layer(embed_planes))
+    return Lux.Chain(
+        Lux.Conv(patch_size, in_channels => embed_planes; stride=patch_size),
+        flatten ? _flatten_spatial : identity, 
+        norm_layer(embed_planes)
+    )
 end
 
 """
@@ -297,7 +302,6 @@ end
 Unpatchify the input tensor `x` with the given patch size and number of output
 channels.
 """
-
 function unpatchify(x, imsize, patch_size, out_channels)
     
     c = out_channels
@@ -310,8 +314,6 @@ function unpatchify(x, imsize, patch_size, out_channels)
     imgs = reshape(x, (h * p1, w * p2, c, size(x, 6)))
     return imgs
 end
-
-
 
 function SpatialAttention(;
     imsize,
@@ -475,11 +477,11 @@ function DiffusionTransformerBlock(
 end
 
 function (dit_block::DiffusionTransformerBlock)(
-    input, 
+    x, 
     ps,
     st::NamedTuple
 )
-    x, c = input
+    x, c = x
 
     modulation, st_new = dit_block.adaLN_modulation(c, ps.adaLN_modulation, st.adaLN_modulation)
     @set! st.adaLN_modulation = st_new
@@ -489,7 +491,6 @@ function (dit_block::DiffusionTransformerBlock)(
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = reshape_modulation.(
         (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp), size(x, 2)
     )
-
 
     x, st_new = dit_block.layer_norm_1(x, ps.layer_norm_1, st.layer_norm_1)
     @set! st.layer_norm_1 = st_new
@@ -739,53 +740,53 @@ additional keyword arguments.
 Based on https://github.com/LuxDL/Boltz.jl/blob/v0.3.9/src/vision/vit.jl#L48-L61
 The architecture is based on https://arxiv.org/abs/2212.09748
 """
-struct ConditionalDiffusionTransformer <: Lux.AbstractExplicitContainerLayer{
-    (:dit, )
-}
-    dit::Lux.AbstractExplicitLayer
-end
+# struct ConditionalDiffusionTransformer <: Lux.AbstractExplicitContainerLayer{
+#     (:dit, )
+# }
+#     dit::Lux.AbstractExplicitLayer
+# end
 
 
 
-function ConditionalDiffusionTransformer(
-    imsize::Tuple{Int, Int};
-    in_channels::Int=3, 
-    patch_size::Tuple{Int, Int}=(16, 16),
-    embed_dim::Int=768, 
-    depth::Int=6, 
-    number_heads=16,
-    mlp_ratio=4.0f0, 
-    dropout_rate=0.1f0, 
-    embedding_dropout_rate=0.1f0,
-)
+# function ConditionalDiffusionTransformer(
+#     imsize::Tuple{Int, Int};
+#     in_channels::Int=3, 
+#     patch_size::Tuple{Int, Int}=(16, 16),
+#     embed_dim::Int=768, 
+#     depth::Int=6, 
+#     number_heads=16,
+#     mlp_ratio=4.0f0, 
+#     dropout_rate=0.1f0, 
+#     embedding_dropout_rate=0.1f0,
+# )
 
-    dit = DiffusionTransformer(
-        imsize; 
-        in_channels=in_channels*2,
-        out_channels=in_channels,
-        patch_size=patch_size, 
-        embed_dim=embed_dim, 
-        depth=depth, 
-        number_heads=number_heads, 
-        mlp_ratio=mlp_ratio, 
-        dropout_rate=dropout_rate, 
-        embedding_dropout_rate=embedding_dropout_rate, 
-    )
+#     dit = DiffusionTransformer(
+#         imsize; 
+#         in_channels=in_channels*2,
+#         out_channels=in_channels,
+#         patch_size=patch_size, 
+#         embed_dim=embed_dim, 
+#         depth=depth, 
+#         number_heads=number_heads, 
+#         mlp_ratio=mlp_ratio, 
+#         dropout_rate=dropout_rate, 
+#         embedding_dropout_rate=embedding_dropout_rate, 
+#     )
 
-    return ConditionalDiffusionTransformer(dit)
-end
+#     return ConditionalDiffusionTransformer(dit)
+# end
 
-function (cdt::ConditionalDiffusionTransformer)(
-    input, 
-    ps::NamedTuple,
-    st::NamedTuple
-)
+# function (cdt::ConditionalDiffusionTransformer)(
+#     input, 
+#     ps::NamedTuple,
+#     st::NamedTuple
+# )
 
-    x, x0, t = input
+#     x, x0, t = input
 
-    x = cat(x, x0; dims=3)
+#     x = cat(x, x0; dims=3)
 
-    x, st = cdt.dit((x, t), ps, st)
+#     x, st = cdt.dit((x, t), ps, st)
 
-    return x, st
-end
+#     return x, st
+# end

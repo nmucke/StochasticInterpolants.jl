@@ -27,7 +27,7 @@ function get_loss(
     x_0::AbstractArray, 
     x_1::AbstractArray,
     t::AbstractArray, 
-    velocity::UNet,
+    velocity,
     interpolant::Function, 
     gamma::Function,
     ps::NamedTuple, 
@@ -186,7 +186,7 @@ function get_forecasting_loss(
     t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
     
     z = randn!(rng, similar(x_1, size(x_1)))
-    # z = sqrt.(t) .* z
+    z = sqrt.(t) .* z
 
     g = interpolant.gamma(t) |> dev
     dg_dt = interpolant.dgamma_dt(t) |> dev
@@ -314,6 +314,72 @@ function get_forecasting_loss(
     return loss, st
 end
 
+
+
+"""
+    get_physics_forecasting_loss(
+        x_0::AbstractArray, 
+        x_1::AbstractArray,
+        pars::AbstractArray,
+        velocity::UNet,
+        interpolant::Function, 
+        gamma::Function,
+        ps::NamedTuple, 
+        st::NamedTuple,
+        rng::AbstractRNG,
+        dev=gpu_device()
+    )
+
+Computes the loss for the stochastic interpolant Model.
+"""
+function get_physics_forecasting_loss(
+    x_0::AbstractArray, 
+    x_1::AbstractArray,
+    pars::AbstractArray,
+    model_velocity::Lux.AbstractExplicitLayer,
+    physics_velocity::Function,
+    interpolant::Interpolant, 
+    ps::NamedTuple, 
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+    batch_size = size(x_0)[end]
+
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+    
+    x_history = x_0
+    x_0 = x_0[:, :, :, end, :]
+
+    physics_vel_t = physics_velocity((x_history, x_history, x_history, x_history))
+    physics_pred = x_0 + physics_vel_t
+
+    physics_discrepancy = physics_pred - x_1
+
+
+    z = randn!(rng, similar(x_1, size(x_1)))
+    z = sqrt.(t) .* z
+
+    g = interpolant.gamma(t) |> dev
+    dg_dt = interpolant.dgamma_dt(t) |> dev
+
+    alpha_t = interpolant.alpha(t) |> dev
+    dalpha_dt = interpolant.dalpha_dt(t) |> dev
+
+    beta_t = interpolant.beta(t) |> dev
+    dbeta_dt = interpolant.dbeta_dt(t) |> dev
+
+    I = (alpha_t + beta_t) .* x_0 .+ beta_t .* (physics_vel_t + physics_discrepancy) .+ g .* z
+    R = (dalpha_dt + dbeta_dt) .* x_0 .+ dbeta_dt .* (physics_vel_t + physics_discrepancy) .+ dg_dt .* z
+
+    model_vel_t, st = model_velocity((I, x_history, pars, t), ps, st)
+
+    full_vel_t = model_vel_t + physics_vel_t
+
+    loss = mean((full_vel_t - R).^2)
+
+    return loss, st
+end
 
 
 """

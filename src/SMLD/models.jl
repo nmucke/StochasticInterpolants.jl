@@ -114,7 +114,7 @@ Creates a Denoising Diffusion Probabilistic Model (DDPM) with a UNet architectur
 struct ScoreMatchingLangevinDynamics <: Lux.AbstractExplicitContainerLayer{
     (:unet, )
 }
-    unet::UNet
+    unet::Lux.AbstractExplicitLayer
     marginal_probability_std::Function
     diffusion_coefficient::Function
     sde_sample::Function

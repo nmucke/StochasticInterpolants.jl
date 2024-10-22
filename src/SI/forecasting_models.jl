@@ -101,6 +101,112 @@ function FollmerStochasticInterpolant(
     )
 end
 
+
+"""
+    LatentFollmerStochasticInterpolant(
+        unet::UNet,
+        sde_sample::Function,
+        ode_sample::Function,
+        interpolant::Function
+    )
+    
+
+A container layer for the Stochastic Interpolant model
+"""
+struct LatentFollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
+    (:velocity, )
+}
+    velocity::Lux.AbstractExplicitLayer
+    score::Function
+    autoencoder::VAE_wrapper
+    interpolant::Interpolant
+    loss::Function
+    gamma::Function
+    diffusion_coefficient::Function
+    drift_term::Function
+    diffusion_term::Function
+    projection
+end
+
+"""
+    LatentFollmerStochasticInterpolant(
+        velocity::Lux.AbstractExplicitLayer,
+        autoencoder::Lux.AbstractExplicitLayer;
+        interpolant=Interpolant(),
+        diffusion_multiplier=0.1f0,
+        dev=gpu_device() 
+    )
+    
+Constructs a Stochastic Interpolant model
+"""
+function LatentFollmerStochasticInterpolant(
+    velocity::Lux.AbstractExplicitLayer,
+    autoencoder::VAE_wrapper;
+    interpolant=Interpolant(),
+    diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
+    projection=nothing,
+    dev=gpu_device()
+)
+
+    gamma(t) = interpolant.gamma(t)
+    dgamma_dt(t) = interpolant.dgamma_dt(t)
+
+    # _diffusion_coefficient(t) = diffusion_coefficient(t) #sqrt.((3f0 .- t) .* (1f0 .- t));#diffusion_coefficient.diffusion_coefficient(t)
+
+    alpha(t) = interpolant.alpha(t)
+    dalpha_dt(t) = interpolant.dalpha_dt(t)
+
+    beta(t) = interpolant.beta(t)
+    dbeta_dt(t) = interpolant.dbeta_dt(t)
+
+    diffusion_term(t, x, x_0, pars, ps, st) = begin
+        return diffusion_coefficient(t)
+    end
+
+
+    score(input, vel_t) = begin
+
+        x, x_0, t = input
+        
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+        
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0;
+        
+        # A = repeat(A, size(x_0)[1:3]...)
+        # beta_ = repeat(beta(t), size(x_0)[1:3]...)
+        
+        return A .* (beta(t) .* vel_t .- c)
+    end
+
+    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+
+        vel_t, st = velocity((x, x_0, pars, t), ps, st)
+
+        if ode_mode
+            return vel_t , st
+        end
+
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
+
+        score = A .* (beta(t) .* vel_t .- c)
+
+        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
+    end
+
+    # Loss including the score network
+    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
+        x_0, x_1, pars, velocity, interpolant, ps, st, rng, dev
+    )
+
+    return LatentFollmerStochasticInterpolant(
+        velocity, score, autoencoder, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
+    )
+end
+
 """
     DataDependentCouplingStochasticInterpolant(
         velocity::Lux.AbstractExplicitLayer
@@ -136,8 +242,8 @@ end
 Constructs a Stochastic Interpolant model
 """
 function DataDependentCouplingStochasticInterpolant(
-    velocity::Lux.AbstractExplicitLayer; 
-    score::Lux.AbstractExplicitLayer,
+    velocity::Lux.AbstractExplicitLayer,
+    score::Lux.AbstractExplicitLayer;
     interpolant=Interpolant(),
     diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
     projection=nothing,
@@ -153,27 +259,30 @@ function DataDependentCouplingStochasticInterpolant(
     beta(t) = interpolant.beta(t)
     dbeta_dt(t) = interpolant.dbeta_dt(t)
 
-    diffusion_term(t, x, x_0, pars, ps, st) = begin
+    diffusion_term(x, ps, st) = begin
+        x, x_0, pars, t = x
         return diffusion_coefficient(t)
     end
 
 
-    drift_term(t, x, x_0, pars, ps, st; ode_mode=false) = begin
+    drift_term(x, ps, st; ode_mode=false) = begin
+        
+        x, x_0, pars, t = x
 
         vel_t, st_new = velocity((x, x_0, pars, t), ps.velocity, st.velocity)
         @set st.velocity = st_new
 
         if ode_mode
-            return vel_t , st
+            return vel_t, st
         end
 
-        score, st_new = score((x, x_0, pars, t), ps.score, st.score)
+        score_term, st_new = score((x, x_0, pars, t), ps.score, st.score)
         @set st.score = st_new
 
         score_multiplication_term = 0.5f0 .* sqrt.(diffusion_coefficient(t)) ./ gamma(t)
-        score_term = score_multiplication_term .* score
+        score_term = score_multiplication_term .* score_term
 
-        return vel_t .+ score_term, st
+        return vel_t .- score_term, st
     end
 
     # Loss including the score network
@@ -181,7 +290,7 @@ function DataDependentCouplingStochasticInterpolant(
         x_0, x_1, pars, velocity, score, interpolant, ps, st, rng, dev
     )
 
-    return FollmerStochasticInterpolant(
+    return DataDependentCouplingStochasticInterpolant(
         velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
     )
 end
@@ -197,20 +306,20 @@ DataDependentCouplingStochasticInterpolant(
 
 A container layer for the Stochastic Interpolant model
 """
-struct DataDependentCouplingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
-    (:g_0, :g_1, :g_z)
-}
-    g_0::Lux.AbstractExplicitLayer; 
-    g_1::Lux.AbstractExplicitLayer; 
-    g_z::Lux.AbstractExplicitLayer; 
-    velocity::Function;
-    interpolant::Function
-    loss::Function
-    gamma::Function
-    diffusion_coefficient::Function
-    drift_term::Function
-    diffusion_term::Function
-end
+# struct DataDependentCouplingStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
+#     (:g_0, :g_1, :g_z)
+# }
+#     g_0::Lux.AbstractExplicitLayer; 
+#     g_1::Lux.AbstractExplicitLayer; 
+#     g_z::Lux.AbstractExplicitLayer; 
+#     velocity::Function;
+#     interpolant::Function
+#     loss::Function
+#     gamma::Function
+#     diffusion_coefficient::Function
+#     drift_term::Function
+#     diffusion_term::Function
+# end
 
 """
 DataDependentCouplingStochasticInterpolant(
