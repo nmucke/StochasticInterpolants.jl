@@ -64,12 +64,10 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 #     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
 # )
 
-
-
 ##### Hyperparameters #####
 # model_config = YAML.load_file("configs/neural_networks/$test_case.yml");
 
-len_history = 2;
+len_history = 3; #2
 
 trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution = prepare_data_for_time_stepping(
     trainset,
@@ -77,27 +75,25 @@ trainset_init_distribution, trainset_target_distribution, trainset_pars_distribu
     len_history=len_history
 );
 
-
-
-embedding_dims = 256;
-batch_size = 4;
+embedding_dims = 128; #256;
 learning_rate = T(1e-4);
-weight_decay = T(1e-8);
-num_epochs = 100;
-channels = [8, 16, 32, 64]; #[16, 32, 64, 128];
+batch_size = 8;
+num_epochs = 1000;
+channels = [16, 32, 64, 128];
+weight_decay = T(1e-6);
+projection = nothing #project_onto_divergence_free;
 if test_case == "transonic_cylinder_flow"
     attention_type = "linear"; # "linear" or "standard" or "DiT"
     use_attention_in_layer = [true, true, true, true]
     attention_embedding_dims = 32;
+    padding = "constant";
     num_heads = 4;
-    padding = "constant";    
 elseif test_case == "turbulence_in_periodic_box"
-    attention_type = "standard"; # "linear" or "standard" or "DiT"
-    # use_attention_in_layer = [false, false, false, false];
-    use_attention_in_layer = [true, true, true, true]
-    attention_embedding_dims = 32 #256
-    num_heads = 4 #8
+    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [false, false, false, false];
+    attention_embedding_dims = 128
     padding = "periodic";
+    num_heads = 8;
 end;
 projection = nothing #project_onto_divergence_free;
 
@@ -118,19 +114,23 @@ velocity = AttnParsConvNextUNet(
     num_heads=num_heads,
 );
 
-
 # Define interpolant and diffusion coefficients
-diffusion_multiplier = 0.5f0;
+diffusion_multiplier = 0.05f0;
 
-gamma = t -> diffusion_multiplier.* (1f0 .- t);
-dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
-diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+# gamma = t -> diffusion_multiplier.* (1f0 .- t);
+# dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+# diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
 
-alpha = t -> 1f0 .- t; 
+gamma = t -> diffusion_multiplier .* sqrt.(2f0 .* t .* (1f0 .- t));
+dgamma_dt = t -> (1f0 .- 2f0 .* t)./(sqrt.(2f0) .* sqrt.(-(-1f0 .+ t) .* t)); #-1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+diffusion_coefficient = t -> gamma(t); #sqrt.((3f0 .- t) .* (1f0 .- t));
+
+
+alpha = t -> 1f0 .- t;
 dalpha_dt = t -> -1f0;
 
-beta = t -> t.^2;
-dbeta_dt = t -> 2f0 .* t;
+beta = t -> t;
+dbeta_dt = t -> 1f0; #2f0 .* t;
 
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
@@ -152,13 +152,14 @@ opt_state = Optimisers.setup(opt, ps);
 continue_training = false;
 if continue_training
     if test_case == "transonic_cylinder_flow"
-        best_model = "checkpoint_epoch_18"
+        best_model = "checkpoint_epoch_10"
         ps, st, opt_state = load_checkpoint("trained_models/transonic_cylinder_flow/$best_model.bson") .|> dev;
     elseif test_case == "incompressible_flow"
         best_model = "best_incompressible_model"
         ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
     elseif test_case == "turbulence_in_periodic_box"
-        best_model = "checkpoint_epoch_10"
+        # best_model = "best_model"
+        best_model = "best_model"
         ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
     end;
 end;
@@ -183,6 +184,7 @@ ps, st = train_stochastic_interpolant(
     rng=rng,
     dev=dev
 );
+
 
 
 CUDA.reclaim()
@@ -371,7 +373,7 @@ compare_sde_pred_with_true(
     num_test_paths,
     normalize_data,
     mask,
-    100,
+    25,
     gif_save_path,
     rng,
     dev,

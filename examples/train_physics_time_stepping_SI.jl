@@ -10,6 +10,7 @@ using LuxCUDA
 using Optimisers
 using FileIO
 using IncompressibleNavierStokes
+using Zygote
 
 CUDA.reclaim()
 GC.gc()
@@ -75,10 +76,10 @@ if test_case == "transonic_cylinder_flow"
     num_heads = 4;
     padding = "constant";    
 elseif test_case == "turbulence_in_periodic_box"
-    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    attention_type = "standard"; # "linear" or "standard" or "DiT"
     use_attention_in_layer = [false, false, false, false];
-    attention_embedding_dims = 256
-    num_heads = 8;
+    attention_embedding_dims = 32
+    num_heads = 4;
     padding = "periodic";
 end;
 projection = nothing #project_onto_divergence_free;
@@ -105,7 +106,7 @@ Re = 10000f0;
 n = 128
 physics_dt = 5f-5 * 10f0 * 4f0;
 ax = LinRange(0f0, 1f0, n + 1);
-setup = Setup(; x = (ax, ax), Re)#, ArrayType = CuArray);
+setup = Setup(; x = (ax, ax), Re, ArrayType = CuArray{T});
 # psolver = psolver_spectral(setup);
 
 
@@ -113,7 +114,8 @@ create_right_hand_side(setup, psolver) = function right_hand_side(u)
     (; Iu) = setup.grid
     u = pad_circular(u, 1; dims = 1:2)
     # F = map(eachslice(u; dims = ndims(u))) do u
-    out = fill(similar(u[:, :, :, 1]), 0)
+    # out = fill(similar(u[:, :, :, 1]), 0)
+    out = Array{eltype(u)}[]
     for i in 1:size(u, 4)
         t = zero(eltype(u))
         # u = eachslice(u; dims = ndims(u))
@@ -124,7 +126,8 @@ create_right_hand_side(setup, psolver) = function right_hand_side(u)
         F = F[2:end-1, 2:end-1, :]
         out = [out; [F]]
     end
-    cat(out...; dims = 4)
+    stack(out; dims = 4)
+    # cat(out...; dims = 4)
     # cat(F...; dims = 4)
 end
 
@@ -134,16 +137,13 @@ physics_velocity(input) = begin
     return (5f-5 * 10f0 * 4f0) * f(x_0[:, :, :, end, :]);
 end;
 
-x = randn(rng, (H, W, C, len_history, batch_size)) .|> T;# |> dev;
-
-out = physics_velocity((x, x, x, x))
-
-using Zygote
-gradient(x -> sum(physics_velocity((x, x, x, x))), x[:, :, :, :, 1])
+# x = randn(rng, (H, W, C, len_history, batch_size)) .|> T |> dev;
+# out = physics_velocity((x, x, x, x))
+# gradient(x -> sum(physics_velocity((x, x, x, x))), x[:, :, :, :, 1])
 
 
 # Define interpolant and diffusion coefficients
-diffusion_multiplier = 0.5f0;
+diffusion_multiplier = 0.1f0;
 
 gamma = t -> diffusion_multiplier.* (1f0 .- t);
 dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;

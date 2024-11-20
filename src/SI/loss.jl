@@ -174,7 +174,7 @@ function get_forecasting_loss(
     x_1::AbstractArray,
     pars::AbstractArray,
     velocity::Lux.AbstractExplicitLayer,
-    interpolant::Interpolant, 
+    interpolant::NamedTuple, 
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -182,17 +182,18 @@ function get_forecasting_loss(
 )
     loss = 0.0
     batch_size = size(x_0)[end]
-
-    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
     
+    x_history = x_0
+    x_0 = x_0[:, :, :, end, :]
+
+    # for _ in 1:5
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+
     z = randn!(rng, similar(x_1, size(x_1)))
     z = sqrt.(t) .* z
 
     g = interpolant.gamma(t) |> dev
     dg_dt = interpolant.dgamma_dt(t) |> dev
-
-    x_history = x_0
-    x_0 = x_0[:, :, :, end, :]
 
     I = interpolant.interpolant(x_0, x_1, t) .|> dev
     dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
@@ -203,9 +204,72 @@ function get_forecasting_loss(
 
     pred, st = velocity((I, x_history, pars, t), ps, st)
 
-    loss = mean((pred - R).^2)
+    loss = loss + mean((pred - R).^2)
 
-    # loss = loss + mean(pred.^2 - 2 .* pred .* R)
+    return loss, st
+end
+
+"""
+    get_forecasting_loss(
+        x_0::AbstractArray, 
+        x_1::AbstractArray,
+        pars::AbstractArray,
+        velocity::Lux.AbstractExplicitLayer,
+        encoder::Lux.AbstractExplicitLayer,
+        interpolant::Function, 
+        gamma::Function,
+        ps::NamedTuple, 
+        st::NamedTuple,
+        rng::AbstractRNG,
+        dev=gpu_device()
+    )
+
+Computes the loss for the stochastic interpolant Model.
+"""
+function get_encoder_forecasting_loss(
+    x_0::AbstractArray, 
+    x_1::AbstractArray,
+    pars::AbstractArray,
+    velocity::Lux.AbstractExplicitLayer,
+    encoder::Lux.AbstractExplicitLayer,
+    interpolant::NamedTuple, 
+    ps::NamedTuple, 
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+    loss = 0.0
+    batch_size = size(x_0)[end]
+    
+    x_history = x_0
+    x_0 = x_0[:, :, :, end, :]
+
+    t = zeros(Float32, (1, 1, 1, batch_size)) |> dev
+
+    encoder_pred, st_new = encoder((x_0, x_history, pars, t), ps.encoder, st.encoder)
+    @set st.encoder = st_new
+
+    loss = 1f-2 * mean((encoder_pred - x_1).^2)
+
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+
+    z = randn!(rng, similar(x_1, size(x_1)))
+    z = sqrt.(t) .* z
+
+    g = interpolant.gamma(t) |> dev
+    dg_dt = interpolant.dgamma_dt(t) |> dev
+
+    I = interpolant.interpolant(encoder_pred, x_1, t) .|> dev
+    dI_dt = interpolant.dinterpolant_dt(encoder_pred, x_1, t) .|> dev
+
+    I = I .+ g .* z
+
+    R = dI_dt .+ dg_dt .* z
+
+    pred, st_new = velocity((I, x_history, pars, t), ps.velocity, st.velocity)
+    @set st.velocity = st_new
+
+    loss = loss + mean((pred - R).^2)
 
     return loss, st
 end
@@ -233,7 +297,7 @@ function get_forecasting_loss(
     pars::AbstractArray,
     velocity::Lux.AbstractExplicitLayer,
     score::Lux.AbstractExplicitLayer,
-    interpolant::Interpolant, 
+    interpolant::NamedTuple, 
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -277,7 +341,7 @@ function get_forecasting_loss(
     g_0::Lux.AbstractExplicitLayer, 
     g_1::Lux.AbstractExplicitLayer, 
     g_z::Lux.AbstractExplicitLayer,
-    interpolant::Interpolant, 
+    interpolant::NamedTuple, 
     gamma::Gamma,
     ps::NamedTuple, 
     st::NamedTuple,
@@ -338,7 +402,7 @@ function get_physics_forecasting_loss(
     pars::AbstractArray,
     model_velocity::Lux.AbstractExplicitLayer,
     physics_velocity::Function,
-    interpolant::Interpolant, 
+    interpolant::NamedTuple, 
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -351,7 +415,7 @@ function get_physics_forecasting_loss(
     x_history = x_0
     x_0 = x_0[:, :, :, end, :]
 
-    physics_vel_t = physics_velocity((x_history, x_history, x_history, x_history))
+    physics_vel_t = physics_velocity((x_0, x_history, pars, t))
     physics_pred = x_0 + physics_vel_t
 
     physics_discrepancy = physics_pred - x_1
@@ -369,14 +433,19 @@ function get_physics_forecasting_loss(
     beta_t = interpolant.beta(t) |> dev
     dbeta_dt = interpolant.dbeta_dt(t) |> dev
 
-    I = (alpha_t + beta_t) .* x_0 .+ beta_t .* (physics_vel_t + physics_discrepancy) .+ g .* z
-    R = (dalpha_dt + dbeta_dt) .* x_0 .+ dbeta_dt .* (physics_vel_t + physics_discrepancy) .+ dg_dt .* z
+    # I = (alpha_t + beta_t) .* x_0 .+ beta_t .* (physics_vel_t + physics_discrepancy) .+ g .* z
+    # R = (dalpha_dt + dbeta_dt) .* x_0 .+ dbeta_dt .* (physics_vel_t + physics_discrepancy) .+ dg_dt .* z
+
+    I = x_0 .+ beta_t .* physics_vel_t .+ beta_t .* physics_discrepancy .+ g .* z
+    # R = dbeta_dt * physics_vel_t + dbeta_dt * physics_discrepancy + dg_dt .* z
 
     model_vel_t, st = model_velocity((I, x_history, pars, t), ps, st)
 
-    full_vel_t = model_vel_t + physics_vel_t
+    loss = mean((model_vel_t - physics_discrepancy + dg_dt .* z).^2)
 
-    loss = mean((full_vel_t - R).^2)
+    # full_vel_t = model_vel_t + physics_vel_t
+
+    # loss = mean((full_vel_t - R).^2)
 
     return loss, st
 end

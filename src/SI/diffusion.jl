@@ -14,5 +14,5 @@ end
     A struct for the diffusion coefficient function
 """
 struct DiffusionCoefficient
-    diffusion_coefficient::Function
+    diffusion_coefficient
 end

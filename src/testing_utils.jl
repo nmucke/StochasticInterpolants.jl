@@ -121,7 +121,7 @@ function compute_temporal_frequency(
 
     n = size(sol_fft, 1)
 
-    freq = fftfreq(n, grid_spacing)[2:Int(n/2)]
+    freq = fftfreq(n, grid_spacing)[2:floor(Int, n/2)]
     sol_fft = sol_fft[2:Int(n/2), :] # only use positive fourier frequencies
 
     return freq, sol_fft
@@ -148,16 +148,10 @@ end
 
 function compute_energy_spectra(sol)
 
-    num_trajectories = size(sol, 5);
+    num_trajectories = size(sol, 4);
     
     nx = size(sol, 1);
     ny = size(sol, 2);
-    
-    u = sol[:, :, 1, :];
-    v = sol[:, :, 2, :];
-    
-    u_fft = fft(u, [1, 2]);
-    v_fft = fft(v, [1, 2]);
     
     kx = fftfreq(nx, nx);
     ky = fftfreq(ny, ny);
@@ -168,19 +162,25 @@ function compute_energy_spectra(sol)
     
     a = 1.6;
     
-    u_fft_squared = abs2.(u_fft) ./ (2 * prod(size(u_fft))^2)
-    v_fft_squared = abs2.(v_fft) ./ (2 * prod(size(v_fft))^2)
-    
     energy = zeros(Float32, length(K_bins), num_trajectories);
     for i = 1:num_trajectories
+        u = sol[:, :, 1, i];
+        v = sol[:, :, 2, i];
+
+        u_fft = fft(u, [1, 2]);
+        v_fft = fft(v, [1, 2]);
+
+        u_fft_squared = abs2.(u_fft) ./ (2 * prod(size(u_fft))^2);
+        v_fft_squared = abs2.(v_fft) ./ (2 * prod(size(v_fft))^2);
+        
         for j = 1:length(K_bins)
             
             bin = K_bins[j]
 
             mask = (K .> bin / a) .& (K .< bin * a)
     
-            u_fft_filtered = u_fft_squared[:, :, i] .* mask
-            v_fft_filtered = v_fft_squared[:, :, i] .* mask
+            u_fft_filtered = u_fft_squared .* mask
+            v_fft_filtered = v_fft_squared .* mask
         
             e = 0.5 * (sum(u_fft_filtered + v_fft_filtered))
     
@@ -227,12 +227,18 @@ function compare_sde_pred_with_true(
         x_true = testset
     end
 
+    if typeof(model) == PhysicsInformedStochasticInterpolant
+        len_history = model.model_velocity.len_history
+    else
+        len_history = model.velocity.len_history
+    end
+    
     pathwise_MSE = 0
     mean_MSE = 0
     x = zeros(size(testset)[1:3]..., num_test_steps, num_test_paths)
     for i = 1:num_test_trajectories
 
-        test_init_condition = testset[:, :, :, 1:model.velocity.len_history, i]
+        test_init_condition = testset[:, :, :, 1:len_history, i]
         test_pars = testset_pars[:, 1:1, i]
 
         x = compute_multiple_SDE_steps(
@@ -267,50 +273,40 @@ function compare_sde_pred_with_true(
 
     end
 
+    x_mean = mean(x, dims=5)[:, :, :, :, 1];
+    x_std = std(x, dims=5)[:, :, :, :, 1];
+
     # Total energy
     energy_true = compute_total_energy(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
     energy_pred = compute_total_energy(x)
+    energy_std = std(energy_pred, dims=2)
+    energy_mean = mean(energy_pred, dims=2)
 
-    plot(energy_true, color=:blue, label="True", linewidth=3)
-    plot!(energy_pred, color=:red, linewidth=3, alpha=0.25)
-    plot!(mean(energy_pred, dims=2), color=:red, label="Pred", linewidth=5)
-    energy_save_path = gif_save_path * "_energy.pdf"
-    savefig(energy_save_path)
-
-    # Divergence
-    divergence_true = compute_divergence(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories], mask)
-    divergence_pred = compute_divergence(x, mask)
-
-    plot(divergence_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
-    plot!(mean(divergence_pred, dims=2), color=:red, label="Pred", linewidth=5)
-    plot!(divergence_true, color=:blue, label="True", linewidth=2)
-    divergence_save_path = gif_save_path * "_divergence.pdf"
-    savefig(divergence_save_path)
+    plot(abs.(energy_mean .- 2f0 .*energy_std), fillrange=energy_mean .+ 2f0 .*energy_std, color=:green, alpha=0.25, primary=false)
+    plot!(energy_true, color=:blue, label="True", linewidth=3)
+    plot!(energy_mean, color=:green, label="Stochastic Interpolant", linewidth=3)
+    savefig(gif_save_path * "_energy.pdf")
 
     # Energy spectra
-    # energy_spectra_true = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
-    # energy_spectra_pred, K_bins = compute_energy_spectra(x[:, :, :, end, 1:1])
+    energy_spectra_true, K_bins = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
+    energy_spectra_pred, K_bins = compute_energy_spectra(x[:, :, :, end, :])
+    energy_spectra_mean = mean(energy_spectra_pred, dims=2)
+    energy_spectra_std = std(energy_spectra_pred, dims=2)
 
-    # plot(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
-    # plot!(K_bins, energy_spectra_pred, color=:red, linewidth=3, xaxis=:log, yaxis=:log, alpha=0.25)
-    # plot!(K_bins, mean(energy_spectra_pred, dims=2), color=:red, label="Pred", linewidth=5, xaxis=:log, yaxis=:log)
-    # energy_spectra_save_path = gif_save_path * "_energy_spectra.pdf"
-    # savefig(energy_spectra_save_path)
+    plot(K_bins, energy_spectra_mean .- 2f0 .* energy_spectra_std, fillrange=energy_spectra_mean .+ 2f0 .* energy_spectra_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
+    plot!(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
+    plot!(K_bins, energy_spectra_mean, color=:green, label="Stochastic Interpolant", linewidth=5, xaxis=:log, yaxis=:log)
+    savefig(gif_save_path * "_energy_spectra.pdf")  
 
     true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
     pred_freq, pred_fft = compute_temporal_frequency(x)
-    pred_fft_mean = mean(pred_fft, dims=2)
-    pred_fft_min = minimum(pred_fft, dims=2)
-    pred_fft_max = maximum(pred_fft, dims=2)
+    pred_fft_mean = mean(pred_fft .* pred_fft, dims=2)
+    pred_fft_std = std(pred_fft .* pred_fft, dims=2)
 
-    plot(true_freq, true_fft .* true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
-    plot!(pred_freq, pred_fft_mean .* pred_fft_mean .* pred_fft_mean, color=:red, label="Pred", linewidth=3, xaxis=:log2, yaxis=:log10)
-    plot!(pred_freq, pred_fft_min .* pred_fft_min .* pred_fft_min, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
-    plot!(pred_freq, pred_fft_max .* pred_fft_max .* pred_fft_max, linestyle=:dash, color=:red, xaxis=:log2, yaxis=:log10)
-
-    frequency_save_path = gif_save_path * "_frequency.pdf"
-    savefig(frequency_save_path)
-
+    plot(true_freq, true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
+    plot!(pred_freq, abs.(pred_fft_mean .- 2f0 .*pred_fft_std), fillrange=pred_fft_mean .+ 2f0 .*pred_fft_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
+    plot!(pred_freq, pred_fft_mean, color=:green, label="Stochastic Interpolant", linewidth=3, xaxis=:log2, yaxis=:log10)
+    savefig(gif_save_path * "_frequency.pdf")
 
     pathwise_MSE /= num_test_trajectories
     mean_MSE /= num_test_trajectories
@@ -318,55 +314,10 @@ function compare_sde_pred_with_true(
     println("Mean of pathwise MSE: ", pathwise_MSE)
     println("Mean of mean MSE (SDE): ", mean_MSE)
 
-    x_mean = mean(x, dims=5)[:, :, :, :, 1];
-    x_std = std(x, dims=5)[:, :, :, :, 1];
-
     x_true_plot = sqrt.(x_true[:, :, 1, :, num_test_trajectories].^2 + x_true[:, :, 2, :, num_test_trajectories].^2)
     x_mean_plot = sqrt.(x_mean[:, :, 1, :].^2 + x_mean[:, :, 2, :].^2)
     x_plot = sqrt.(x[:, :, 1, :, :].^2 + x[:, :, 2, :, :].^2)
     x_std_plot = std(x_plot, dims=4)
-    # x_true_plot = x_true[:, :, 4, :, num_test_trajectories]
-    # x_mean_plot = x_mean[:, :, 4, :]
-    # x_plot = x[:, :, 4, :, :]
-    # x_std_plot = std(x_plot, dims=4)
-    
-
-    # inidividual_snapshot_save_path = gif_save_path * "/individual_snapshots/"
-    # for i = 1:num_test_steps
-    #     heatmap(
-    #         x_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
-    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
-    #     )
-    #     savefig(inidividual_snapshot_save_path * "1_tra_pred_$i.pdf")
-    # end
-    # for i = 1:num_test_steps
-    #     heatmap(
-    #         x_plot[:, :, i, 2], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
-    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
-    #     )
-    #     savefig(inidividual_snapshot_save_path * "2_tra_pred_$i.pdf")
-    # end
-    # for i = 1:num_test_steps
-    #     heatmap(
-    #         x_plot[:, :, i, 3], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
-    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
-    #     )
-    #     savefig(inidividual_snapshot_save_path * "3_tra_pred_$i.pdf")
-    # end
-    # for i = 1:num_test_steps
-    #     heatmap(
-    #         x_std_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
-    #         colorbar=true, color=cgrad(:Spectral_11, rev=true)
-    #     )
-    #     savefig(inidividual_snapshot_save_path * "std_$i.pdf")
-    # end
-    # for i = 1:num_test_steps
-    #     heatmap(
-    #         x_true_plot[:, :, i], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
-    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
-    #     )
-    #     savefig(inidividual_snapshot_save_path * "true_$i.pdf")
-    # end
 
     preds_to_save = (
         x_true_plot, 
@@ -509,3 +460,59 @@ function compare_ode_pred_with_true(
     CUDA.reclaim()
     GC.gc()
 end
+
+
+
+    # # Divergence
+    # divergence_true = compute_divergence(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories], mask)
+    # divergence_pred = compute_divergence(x, mask)
+
+    # plot(divergence_pred, color=:red, label="Pred", linewidth=3, alpha=0.25)
+    # plot!(mean(divergence_pred, dims=2), color=:red, label="Pred", linewidth=5)
+    # plot!(divergence_true, color=:blue, label="True", linewidth=2)
+    # divergence_save_path = gif_save_path * "_divergence.pdf"
+    # savefig(divergence_save_path)
+
+
+    # x_true_plot = x_true[:, :, 4, :, num_test_trajectories]
+    # x_mean_plot = x_mean[:, :, 4, :]
+    # x_plot = x[:, :, 4, :, :]
+    # x_std_plot = std(x_plot, dims=4)
+    
+
+    # inidividual_snapshot_save_path = gif_save_path * "/individual_snapshots/"
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "1_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 2], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "2_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_plot[:, :, i, 3], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "3_tra_pred_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_std_plot[:, :, i, 1], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true)
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "std_$i.pdf")
+    # end
+    # for i = 1:num_test_steps
+    #     heatmap(
+    #         x_true_plot[:, :, i], legend=false, xticks=false, yticks=false, aspect_ratio=:equal, 
+    #         colorbar=true, color=cgrad(:Spectral_11, rev=true), clim=(minimum(x_true_plot), maximum(x_true_plot)),
+    #     )
+    #     savefig(inidividual_snapshot_save_path * "true_$i.pdf")
+    # end

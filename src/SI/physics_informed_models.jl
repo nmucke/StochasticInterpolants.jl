@@ -17,7 +17,7 @@ struct PhysicsInformedStochasticInterpolant <: Lux.AbstractExplicitContainerLaye
     model_velocity::Lux.AbstractExplicitLayer
     physics_velocity::Function
     score::Function
-    interpolant::Interpolant
+    interpolant::NamedTuple
     loss::Function
     gamma::Function
     diffusion_coefficient::Function
@@ -60,11 +60,6 @@ function PhysicsInformedStochasticInterpolant(
         return diffusion_coefficient(t)
     end
 
-    physics_velocity = (input) -> begin
-        x, x_0, pars, t = input
-        return x_0[:, :, :, end, :]
-    end
-
     velocity(input, ps, st) = begin
 
         model_vel, st = model_velocity(input, ps, st)
@@ -92,9 +87,9 @@ function PhysicsInformedStochasticInterpolant(
         model_vel_t, st = model_velocity((x, x_0, pars, t), ps, st)
 
         if !isnothing(phys_vel)
-            model_vel_t = model_vel_t .+ phys_vel
+            vel_t = model_vel_t #.+ phys_vel
         else
-            model_vel_t = model_vel_t .+ physics_velocity((x, x_0, pars, t))
+            vel_t = model_vel_t #.+ physics_velocity((x, x_0, pars, t))
         end
 
         if ode_mode

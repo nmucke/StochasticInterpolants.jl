@@ -231,6 +231,7 @@ function multiple_conv_next_blocks(;
         )
     ) do x
         x, t = x
+        # @return block_1((x, t))
         x = block_1((x, t))
         @return block_2((x, t))
     end
@@ -309,6 +310,30 @@ AttnParsConvNextUNet(
 Create a conditional U-Net model with the given image size, number of channels,
 block depth, frequency range, and embedding dimensions.
 """
+# struct AttnParsConvNextUNet{L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13} <: Lux.AbstractExplicitContainerLayer{
+#     (
+#         :conv_in, :conv_out, :conv_down_blocks, 
+#         :down_blocks, :bottleneck1, :bottleneck2, :conv_up_blocks, 
+#         :up_blocks, :t_embedding, :pars_embedding, :attn_down_blocks,
+#         :bottleneck_attn, :attn_up_blocks
+#     )
+# }
+#     # layes::LayersType
+#     conv_in::L1
+#     conv_out::L2
+#     conv_down_blocks::L3
+#     down_blocks::L4
+#     bottleneck1::L5
+#     bottleneck2::L6
+#     conv_up_blocks::L7
+#     up_blocks::L8
+#     t_embedding::L9
+#     pars_embedding::L10
+#     attn_down_blocks::L11
+#     bottleneck_attn::L12
+#     attn_up_blocks::L13
+#     len_history::Int
+# end
 struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     (
         :conv_in, :conv_out, :conv_down_blocks, 
@@ -317,6 +342,7 @@ struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
         :bottleneck_attn, :attn_up_blocks
     )
 }
+    # layes::LayersType
     conv_in::Lux.AbstractExplicitLayer
     conv_out::Lux.AbstractExplicitLayer
     conv_down_blocks::Lux.AbstractExplicitLayer
@@ -330,7 +356,6 @@ struct AttnParsConvNextUNet <: Lux.AbstractExplicitContainerLayer{
     attn_down_blocks::Lux.AbstractExplicitLayer
     bottleneck_attn::Lux.AbstractExplicitLayer
     attn_up_blocks::Lux.AbstractExplicitLayer
-    # pars_upsample::Lux.AbstractExplicitLayer
     len_history::Int
 end
 
@@ -429,9 +454,9 @@ function AttnParsConvNextUNet(
         ))
     end
 
-    conv_down_blocks = Chain(conv_down_blocks...; disable_optimizations=true)
-    attn_down_blocks = Chain(attn_down_blocks...; disable_optimizations=true)
-    down_blocks = Chain(down_blocks...; disable_optimizations=true)
+    conv_down_blocks = Chain(conv_down_blocks...)#; disable_optimizations=true)
+    attn_down_blocks = Chain(attn_down_blocks...)#; disable_optimizations=true)
+    down_blocks = Chain(down_blocks...)#; disable_optimizations=true)
 
     imsize = div.(image_size, 2^(length(channels) - 1))
     
@@ -476,7 +501,7 @@ function AttnParsConvNextUNet(
         push!(
             conv_up_blocks, 
             multiple_conv_next_blocks(
-                in_channels=channels[i],# * 2, 
+                in_channels=channels[i] * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
                 embedding_dims=embedding_dims,
@@ -494,9 +519,9 @@ function AttnParsConvNextUNet(
         end
     end
 
-    conv_up_blocks = Chain(conv_up_blocks...; disable_optimizations=true)
-    attn_up_blocks = Chain(attn_up_blocks...; disable_optimizations=true)
-    up_blocks = Chain(up_blocks...; disable_optimizations=true)
+    conv_up_blocks = Chain(conv_up_blocks...)#; disable_optimizations=true)
+    attn_up_blocks = Chain(attn_up_blocks...)#; disable_optimizations=true)
+    up_blocks = Chain(up_blocks...)#; disable_optimizations=true)
 
     conv_out = Chain(
         conv_next_block_no_pars(
@@ -588,8 +613,8 @@ function (conv_next_unet::AttnParsConvNextUNet)(
         )
         @set! st.up_blocks[layer_name] = new_st
 
-        # x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
-        x = x + skips[end-i+1]
+        x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+        # x = x + skips[end-i+1]
               
         x, new_st = conv_next_unet.conv_up_blocks[i](
             (x, t_emb), ps.conv_up_blocks[layer_name], st.conv_up_blocks[layer_name]
@@ -608,8 +633,6 @@ function (conv_next_unet::AttnParsConvNextUNet)(
 
     return x, st
 end
-
-
 
 
 ###############################################################################

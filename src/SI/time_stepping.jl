@@ -30,20 +30,21 @@ function compute_multiple_SDE_steps(;
     
     sol = zeros(size(init_condition)[1:3]..., num_physical_steps, num_paths)
 
-    sol[:, :, :, 1:model.velocity.len_history, :] = repeat(init_condition, 1, 1, 1, num_paths)
+    if typeof(model) == PhysicsInformedStochasticInterpolant
+        len_history = model.model_velocity.len_history
+    else
+        len_history = model.velocity.len_history
+    end
+
+    sol[:, :, :, 1:len_history, :] = repeat(init_condition, 1, 1, 1, num_paths)
 
     pars = repeat(parameters, 1, num_paths) |> dev
 
-    # x_n = sol[:, :, :, 1:model.velocity.len_history, :] |> dev
-    for i in ProgressBar(model.velocity.len_history:(num_physical_steps - 1))
-
-        # if !isnothing(mask)
-        #     x_n = x_n .* mask
-        # end
-
+    for i in ProgressBar(len_history:(num_physical_steps - 1))
+    # for i in len_history:(num_physical_steps - 1)
         
         x_n = forecasting_sde_sampler(
-            sol[:, :, :, (i-model.velocity.len_history+1):i, :] |> dev, pars, model, ps, st, num_generator_steps, rng, dev
+            sol[:, :, :, (i-len_history+1):i, :] |> dev, pars, model, ps, st, num_generator_steps, rng, dev
         )
 
         if !isnothing(mask)
@@ -53,12 +54,17 @@ function compute_multiple_SDE_steps(;
         sol[:, :, :, i+1, :] = x_n |> cpu_dev
 
         if findmax(abs.(x_n))[1] > 1e6
-            print("Trajectory diverged")
+        # if findmax(abs, x_n)[1] > 1e6
+                print("Trajectory diverged")
             break
         elseif any(isnan, x_n)
             print("NaN encountered")
             break
         end
+
+        # CUDA.reclaim()
+        GC.gc(true)
+
     end
 
     return sol

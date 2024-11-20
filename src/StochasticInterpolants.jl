@@ -89,6 +89,7 @@ export FollmerStochasticInterpolant
 export LatentFollmerStochasticInterpolant
 export DataDependentCouplingStochasticInterpolant
 export PhysicsInformedStochasticInterpolant
+export EncoderFollmerStochasticInterpolant
 
 # Sampling
 export sde_sampler
@@ -110,6 +111,7 @@ export Interpolant
 export get_loss
 export get_forecasting_loss
 export get_physics_forecasting_loss
+export get_encoder_forecasting_loss
 
 # Training
 export train_stochastic_interpolant

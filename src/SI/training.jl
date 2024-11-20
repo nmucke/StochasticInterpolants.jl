@@ -98,7 +98,7 @@ function train_stochastic_interpolant(;
 
     early_stop_patience = 10
 
-    num_generator_steps = 75
+    num_generator_steps = 50
 
     num_steps = size(testset, 4)
 
@@ -128,20 +128,15 @@ function train_stochastic_interpolant(;
             x_0 = trainset_init_distribution[:, :, :, :, i:i+batch_size-1] |> dev
             pars = trainset_pars_distribution[:, i:i+batch_size-1] |> dev
             
-            # @infiltrate
+            # Compute the regular loss
 
-            loss, pb_f = Zygote.pullback(
-                p -> model.loss(x_0, x_1, pars, p, st, rng, dev)[1], ps
+            (loss, st), pb_f = Zygote.pullback(
+                p -> model.loss(x_0, x_1, pars, p, st, rng, dev), ps
             );
-
-            print(loss)
-            error()
-
             running_loss += loss
-
-            gs = pb_f((one(loss), nothing))[1];
-            
+            gs = pb_f((one(loss), nothing))[1];         
             opt_state, ps = Optimisers.update!(opt_state, ps, gs)
+
             
         end
 
@@ -157,11 +152,10 @@ function train_stochastic_interpolant(;
             print("Loss Value after $epoch iterations: $running_loss \n")
         end
         
-        new_learning_rate = min_learning_rate .+ 0.5f0 .* (init_learning_rate - min_learning_rate) .* (1 .+ cos.(new_learning_rate ./ num_epochs .* pi));
+        new_learning_rate = min_learning_rate .+ 0.5f0 .* (init_learning_rate - min_learning_rate) .* (1 .+ 1f0 .* cos.(epoch ./ num_epochs .* pi));
         Optimisers.adjust!(opt_state, new_learning_rate)
 
-
-        if epoch % 10 == 0
+        if epoch % 2 == 0
 
             CUDA.reclaim()
             GC.gc()

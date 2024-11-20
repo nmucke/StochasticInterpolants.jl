@@ -5,6 +5,7 @@ using NNlib
 using Setfield
 using StochasticInterpolants
 using LuxCUDA
+using Plots
 
 
 # function sample_sde(
@@ -246,20 +247,24 @@ end
 #     return drift_t, st
 # end
 function SDE_heun(
-    drift_term::Function,
-    diffusion_term::Function,
-    x::AbstractArray,
-    pars::AbstractArray,
-    timesteps::AbstractArray,
+    drift_term,
+    diffusion_term,
+    x,
+    pars,
+    timesteps,
     ps::NamedTuple,
     st::NamedTuple,
-    rng::AbstractRNG,
+    rng,
     dev=gpu_device()
 )
 
     num_steps = length(timesteps)
+    # (; z, dW) = cache
 
+    z = similar(x, size(x))
+    dW = similar(x, size(x))
     for i = 1:(num_steps-1)
+
         dt = Float32(timesteps[i+1] - timesteps[i]) |> dev
 
         # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
@@ -267,20 +272,20 @@ function SDE_heun(
         # t_diffusion = t_drift#timesteps[i:i]#repeat(t_drift, size(x)[1:3]...)   
 
         # z = randn(rng, size(x)) |> dev
-        z = randn!(rng, similar(x, size(x)))
-        dW = sqrt(dt) .* z
+        z = randn!(rng, z)
+        dW .= sqrt(dt) .* z
         
         # Predictor from Euler step
         predictor_drift, st = drift_term(t, x, pars, ps, st)
-        predictor_diffusion = diffusion_term(t, x, pars, ps, st) 
-        predictor = @. x + predictor_drift * dt + predictor_diffusion * dW
+        predictor_diffusion = diffusion_term(t, x, pars, ps, st)
+        predictor = x .+ predictor_drift .* dt .+ predictor_diffusion .* dW
 
         # Corrector from Heun step
         heun_drift, st = drift_term(t .+ dt, predictor, pars, ps, st)
         drift_corrector = 0.5f0 * (predictor_drift .+ heun_drift)
         diffusion_corrector = 0.5f0 * (diffusion_term(t, x, pars, ps, st) .+ diffusion_term(t .+ dt, predictor, pars, ps, st))
 
-        x = x .+ drift_corrector .* dt + diffusion_corrector .* dW
+        x .= x .+ drift_corrector .* dt + diffusion_corrector .* dW
 
     end
 
@@ -341,6 +346,7 @@ function SDE_runge_kutta(
 
     for i = 1:(num_steps-1)
 
+
         # t_drift = timesteps[i] .* ones(Float32, 1, 1, 1, size(x)[end]) |> dev
         t_drift = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[i])
         t_diffusion = timestep[i]#repeat(t_drift, size(x)[1:3]...)   
@@ -374,6 +380,7 @@ function SDE_runge_kutta(
 
         x = x .+ drift_t .+ diffusion_t
 
+
     end
 
     return x
@@ -394,7 +401,6 @@ function forecasting_sde_sampler(
 
     # define time span
     timesteps = LinRange(0.0f0, 1.0f0, num_steps)
-    # timesteps = sqrt.(timesteps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
 
@@ -409,37 +415,40 @@ function forecasting_sde_sampler(
 
     x = x_0[:, :, :, end, :]
 
+    if typeof(model) == EncoderFollmerStochasticInterpolant
+        
+        t = zeros(1, 1, 1, size(x_0)[end])|> dev 
+        x, st_new = model.encoder((x, x_0, pars, t), ps.encoder, st.encoder)
+        @set st.encoder = st_new
+
+        ps = ps.velocity
+        st = st.velocity
+
+    end
+
 
     # Initial step
     z = randn!(rng, similar(x, size(x)))
     dW = sqrt(dt) .* z
 
     t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1]) |> dev 
-
-
-    if typeof(model) == PhysicsInformedStochasticInterpolant
-        phys_vel_t = model.physics_velocity((x, x_0, pars, t))
-    else
-        phys_vel_t = nothing
-    end
-    
-    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true, phys_vel=phys_vel_t)
+    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true);
 
     # Initial step
     # x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
-    x = x + vel_t .* dt .+ model.gamma(t) .* dW
+    x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
 
     # Remaining steps
-    drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st; phys_vel=phys_vel_t)
+    drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st);#; phys_vel=phys_vel_t)
     diffusion_term(t, x, pars, ps, st) = model.diffusion_term(t, x, x_0, pars, ps, st)
     # x = SDE_runge_kutta(
-    x = SDE_euler_maruyama(
-    # x = SDE_heun(
+    # x = SDE_euler_maruyama(
+    x = SDE_heun(
         drift_term,
         diffusion_term,
         x,
         pars,
-        timesteps[2:end-1],
+        timesteps[2:end],
         ps,
         st,
         rng,
@@ -448,15 +457,18 @@ function forecasting_sde_sampler(
 
     # Final step
     # z = randn(rng, size(x_0)) |> dev
-    z = randn!(rng, similar(x, size(x)))
+    # z = randn!(rng, similar(x, size(x)))
 
-    dt = Float32.(timesteps[end] - timesteps[end-1])
+    # dt = Float32.(timesteps[end] - timesteps[end-1])
+    # dW = sqrt(dt) .* z
     
-    t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
-    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true)
+    # t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
+    # # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true); #, phys_vel=phys_vel_t)
+    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=false);
 
-    t = repeat(t, size(x)[1:3]...)
-    x = x + vel_t .* dt .+ model.gamma(t) .* sqrt.(dt) .* z   
+    # t = repeat(t, size(x)[1:3]...)
+    # # x = x + vel_t .* dt .+ model.gamma(t) .* dw  
+    # x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
 
     if !isnothing(model.projection)
         x = model.projection(x, dev)
