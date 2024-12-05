@@ -1,18 +1,14 @@
 
 
-"""
-    Gamma
-    A struct for the gamma function and its derivative
-"""
-struct Gamma
-    gamma::Function
-    dgamma_dt::Function
-end
 
-"""
-    DiffusionCoefficient
-    A struct for the diffusion coefficient function
-"""
-struct DiffusionCoefficient
-    diffusion_coefficient
+function get_diffusion_coefficient(
+    type::String,
+    multiplier,
+)
+    if type == "linear"
+        diffusion_coefficient = t -> multiplier .* (1f0 .- t);
+    elseif type == "follmer_optimal"
+        diffusion_coefficient = t -> multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+    end
+    return diffusion_coefficient
 end

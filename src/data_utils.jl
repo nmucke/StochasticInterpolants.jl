@@ -151,22 +151,22 @@ function prepare_data_for_time_stepping(
     H, W, C, num_steps, num_trajectories = size(trainset)
     pars_dim = size(trainset_pars, 1)
 
-    trainset_init_distribution = zeros(H, W, C, len_history, num_steps-len_history, num_trajectories);
-    trainset_target_distribution = zeros(H, W, C, num_steps-len_history, num_trajectories);
+    init_distribution = zeros(H, W, C, len_history, num_steps-len_history, num_trajectories);
+    target_distribution = zeros(H, W, C, num_steps-len_history, num_trajectories);
     for i in 1:num_trajectories
         for step = 1:num_steps-len_history
-            trainset_init_distribution[:, :, :, :, step, i] = trainset[:, :, :, step:(step+len_history-1), i];
-            trainset_target_distribution[:, :, :, step, i] = trainset[:, :, :, step+len_history, i];
+            init_distribution[:, :, :, :, step, i] = trainset[:, :, :, step:(step+len_history-1), i];
+            target_distribution[:, :, :, step, i] = trainset[:, :, :, step+len_history, i];
         end;
     end;
     trainset_pars = trainset_pars[:, 1:(num_steps-len_history), :];
     
-    trainset_init_distribution = reshape(trainset_init_distribution, H, W, C, len_history, (num_steps-len_history)*num_trajectories);
-    trainset_target_distribution = reshape(trainset_target_distribution, H, W, C, (num_steps-len_history)*num_trajectories);
-    trainset_pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-len_history)*num_trajectories);
+    init_distribution = reshape(init_distribution, H, W, C, len_history, (num_steps-len_history)*num_trajectories);
+    target_distribution = reshape(target_distribution, H, W, C, (num_steps-len_history)*num_trajectories);
+    pars_distribution = reshape(trainset_pars, pars_dim, (num_steps-len_history)*num_trajectories);
     
 
-    return trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution
+    return (; init_distribution, target_distribution, pars_distribution)
 end
 
 function load_test_case_data(

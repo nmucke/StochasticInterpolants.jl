@@ -21,6 +21,16 @@ include("neural_network_layers/transformer.jl")
 # include("neural_network_layers/conv.jl")
 include("neural_network_layers/autoencoder.jl")
 include("neural_network_layers/diffusion_transformer.jl")
+include("neural_network_layers/neural_network_utils.jl")
+
+export parameter_diffusion_transformer_block
+
+export pars_cat
+export transform_to_nothing
+export Identity
+export StateParsIdentity
+export get_padding
+export get_attention_layer
 
 export transform_to_nothing
 export LinearMultiHeadSelfAttention
@@ -69,6 +79,49 @@ export dit_down_block
 export dit_up_block
 
 
+##### Utils #####
+include("plotting_utils.jl")
+include("checkpoint_utils.jl")
+include("data_utils.jl")
+include("preprocessing_utils.jl")
+include("testing_utils.jl")
+include("projections.jl")
+
+# Plotting
+export create_gif
+
+# Checkpoint
+export save_checkpoint
+export load_checkpoint
+export CheckpointManager
+
+# Data
+export load_transonic_cylinder_flow_data
+export load_incompressible_flow_data
+export load_turbulence_in_periodic_box_data
+export prepare_data_for_time_stepping
+export load_test_case_data
+
+# Preprocessing
+export StandardizeData
+export NormalizePars
+
+# Testing
+export compute_RMSE
+export compute_energy_spectra
+export compute_spatial_frequency
+export compute_temporal_frequency
+export compare_sde_pred_with_true
+export compare_ode_pred_with_true
+export compute_total_energy
+
+# Projections
+export divfunc
+export gradfunc
+export laplacefunc
+export project_onto_divergence_free
+
+
 ##### SI #####
 include("SI/diffusion.jl")
 include("SI/interpolants.jl")
@@ -101,11 +154,12 @@ export SDE_heun
 export ODE_runge_kutta
 
 # Diffusion
-export Gamma
-export DiffusionCoefficient
+# export DiffusionCoefficient
+export get_diffusion_coefficient
 
 # Interpolants
 export Interpolant
+export get_interpolant
 
 # Loss
 export get_loss
@@ -120,48 +174,6 @@ export train_stochastic_interpolant
 export compute_multiple_SDE_steps
 export compute_multiple_ODE_steps
 
-
-
-##### Utils #####
-include("plotting_utils.jl")
-include("checkpoint_utils.jl")
-include("data_utils.jl")
-include("preprocessing_utils.jl")
-include("testing_utils.jl")
-include("projections.jl")
-
-# Plotting
-export create_gif
-
-# Checkpoint
-export save_checkpoint
-export load_checkpoint
-
-# Data
-export load_transonic_cylinder_flow_data
-export load_incompressible_flow_data
-export load_turbulence_in_periodic_box_data
-export prepare_data_for_time_stepping
-export load_test_case_data
-
-# Preprocessing
-export StandardizeData
-export NormalizePars
-
-# Testing
-export compute_RMSE
-export compute_energy_spectra
-export compute_spatial_frequency
-export compute_temporal_frequency
-export compare_sde_pred_with_true
-export compare_ode_pred_with_true
-export compute_total_energy
-
-# Projections
-export divfunc
-export gradfunc
-export laplacefunc
-export project_onto_divergence_free
 
 
 ##### Training #####

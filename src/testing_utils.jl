@@ -122,7 +122,7 @@ function compute_temporal_frequency(
     n = size(sol_fft, 1)
 
     freq = fftfreq(n, grid_spacing)[2:floor(Int, n/2)]
-    sol_fft = sol_fft[2:Int(n/2), :] # only use positive fourier frequencies
+    sol_fft = sol_fft[2:Int(floor(n/2)), :] # only use positive fourier frequencies
 
     return freq, sol_fft
 end
@@ -202,7 +202,7 @@ function compare_sde_pred_with_true(
     normalize_data,
     mask,
     num_generator_steps,
-    gif_save_path,
+    figures_save_path,
     rng,
     dev,
 )
@@ -285,7 +285,7 @@ function compare_sde_pred_with_true(
     plot(abs.(energy_mean .- 2f0 .*energy_std), fillrange=energy_mean .+ 2f0 .*energy_std, color=:green, alpha=0.25, primary=false)
     plot!(energy_true, color=:blue, label="True", linewidth=3)
     plot!(energy_mean, color=:green, label="Stochastic Interpolant", linewidth=3)
-    savefig(gif_save_path * "_energy.pdf")
+    savefig(figures_save_path * "_energy.pdf")
 
     # Energy spectra
     energy_spectra_true, K_bins = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
@@ -296,7 +296,7 @@ function compare_sde_pred_with_true(
     plot(K_bins, energy_spectra_mean .- 2f0 .* energy_spectra_std, fillrange=energy_spectra_mean .+ 2f0 .* energy_spectra_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
     plot!(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
     plot!(K_bins, energy_spectra_mean, color=:green, label="Stochastic Interpolant", linewidth=5, xaxis=:log, yaxis=:log)
-    savefig(gif_save_path * "_energy_spectra.pdf")  
+    savefig(figures_save_path * "_energy_spectra.pdf")  
 
     true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
     pred_freq, pred_fft = compute_temporal_frequency(x)
@@ -306,7 +306,7 @@ function compare_sde_pred_with_true(
     plot(true_freq, true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
     plot!(pred_freq, abs.(pred_fft_mean .- 2f0 .*pred_fft_std), fillrange=pred_fft_mean .+ 2f0 .*pred_fft_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
     plot!(pred_freq, pred_fft_mean, color=:green, label="Stochastic Interpolant", linewidth=3, xaxis=:log2, yaxis=:log10)
-    savefig(gif_save_path * "_frequency.pdf")
+    savefig(figures_save_path * "_frequency.pdf")
 
     pathwise_MSE /= num_test_trajectories
     mean_MSE /= num_test_trajectories
@@ -331,7 +331,7 @@ function compare_sde_pred_with_true(
     );
     create_gif(
         preds_to_save, 
-        gif_save_path * ".gif", 
+        figures_save_path * ".gif", 
         ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"]
     )
 

@@ -249,7 +249,13 @@ function get_encoder_forecasting_loss(
     encoder_pred, st_new = encoder((x_0, x_history, pars, t), ps.encoder, st.encoder)
     @set st.encoder = st_new
 
-    loss = 1f-2 * mean((encoder_pred - x_1).^2)
+    enc_loss = mean((encoder_pred - x_1).^2)
+
+    # energy_pred = sum(encoder_pred.^2, dims=(1, 2, 3))
+    # energy_true = sum(x_1.^2, dims=(1, 2, 3))
+
+    # energy_loss = mean((energy_pred - energy_true).^2)
+    # energy_loss = energy_loss / mean(energy_true)
 
     t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
 
@@ -269,9 +275,19 @@ function get_encoder_forecasting_loss(
     pred, st_new = velocity((I, x_history, pars, t), ps.velocity, st.velocity)
     @set st.velocity = st_new
 
-    loss = loss + mean((pred - R).^2)
+    SI_loss = mean((pred - R).^2)
 
-    return loss, st
+    return enc_loss + SI_loss, st
+
+    # Get all loss on the same scale
+
+    # print("Encoder Loss: ", enc_loss, " Energy Loss: ", energy_loss, " SI Loss: ", SI_loss, "\n")
+
+    # enc_loss = enc_loss / max_loss
+    # energy_loss = energy_loss / max_loss
+    # SI_loss = SI_loss / max_loss
+
+    # return enc_loss + energy_loss + SI_loss, st
 end
 
 
@@ -342,7 +358,7 @@ function get_forecasting_loss(
     g_1::Lux.AbstractExplicitLayer, 
     g_z::Lux.AbstractExplicitLayer,
     interpolant::NamedTuple, 
-    gamma::Gamma,
+    gamma,
     ps::NamedTuple, 
     st::NamedTuple,
     rng::AbstractRNG,
@@ -450,92 +466,3 @@ function get_physics_forecasting_loss(
     return loss, st
 end
 
-
-"""
-    get_action_matching_loss(
-        x_0::AbstractArray, 
-        x_1::AbstractArray,
-        t::AbstractArray, 
-        velocity::UNet,
-        score::UNet,
-        interpolant::Function, 
-        gamma::Function,
-        ps::NamedTuple, 
-        st::NamedTuple,
-        rng::AbstractRNG,
-        dev=gpu_device()
-    )
-
-Computes the loss for the stochastic interpolant Model.
-"""
-# function get_action_matching_loss(
-#     x_0::AbstractArray, 
-#     x_1::AbstractArray,
-#     pars::AbstractArray,
-#     action::Lux.AbstractExplicitLayer,
-#     interpolant::Interpolant,
-#     diffusion_coefficient::Function,
-#     ps::NamedTuple, 
-#     st::NamedTuple,
-#     rng::AbstractRNG,
-#     dev=gpu_device()
-# )
-
-#     batch_size = size(x_0)[end]
-
-#     # Sample time
-#     t_0 = zeros(Float32, (1, 1, 1, batch_size)) |> dev
-#     t_1 = ones(Float32, (1, 1, 1, batch_size)) |> dev
-#     t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
-
-#     # Sample noise
-#     # z = randn!(rng, similar(x_1, size(x_1)))
-#     # z = diffusion_coefficient .* z
-
-#     x_history = x_0
-#     x_0 = x_0[:, :, :, end, :]
-
-#     # Compute boundary terms
-#     left_boundary = action((x_0, x_history, pars, t_0), ps, st)
-#     right_boundary = action((x_1, x_history, pars, t_1), ps, st)
-
-#     loss = left_boundary - right_boundary
-
-#     # Compute time terms 
-#     s_t_samples = interpolant.interpolant(x_0, x_1, t) .|> dev
-
-#     forward_func_x = x -> action((x, x_history, pars, t), ps, st)
-#     forward_func_t = t -> action((s_t_samples, x_history, pars, t), ps, st)
-
-#     grad_s_t_term = ForwardDiff.gradient(forward_func_x, s_t_samples)
-#     grad_s_t_term = sum(0.5 .* grad_s_t_term.^2, (1, 2))
-
-#     ds_t_dt = ForwardDiff.derivative(forward_func_t, t)
-
-#     0.5*diffusion_coefficient(t)**2*(jvp_val*eps).sum(1, keepdims=True)
-
-
-#     funcres(x) = first(phi(x,res.minimizer))
-#     dxu        = ForwardDiff.derivative.(funcres, Array(x_plot))
-#     display(plot(x_plot,dxu,title = "Derivative",linewidth=3))
-
-
-
-
-
-
-
-    
-
-#     I = I .+ g .* z
-
-#     R = dI_dt .+ dg_dt .* z
-
-#     pred, st = velocity((I, x_history, pars, t), ps, st)
-
-#     loss = mean((pred - R).^2)
-
-#     # loss = loss + mean(pred.^2 - 2 .* pred .* R)
-
-#     return loss, st
-# end

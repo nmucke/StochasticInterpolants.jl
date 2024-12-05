@@ -43,8 +43,8 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
 
 ##### Hyperparameters #####
-len_history = 2;
-embedding_dims = 256;
+len_history = 2; #2;
+embedding_dims = 128; #256
 
 batch_size = 8;
 num_epochs = 1000;
@@ -57,11 +57,21 @@ if test_case == "transonic_cylinder_flow"
     padding = "constant";
     num_heads = 4;
 elseif test_case == "turbulence_in_periodic_box"
-    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    # attention_type = "linear"; # "linear" or "standard" or "DiT"
+    # use_attention_in_layer = [true, true, true, true];
+    # attention_embedding_dims = 32
+    # padding = "periodic";
+    # num_heads = 4;
+    attention_type = "standard"; # "linear" or "standard" or "DiT"
     use_attention_in_layer = [false, false, false, false];
-    attention_embedding_dims = 256
+    attention_embedding_dims = 128
     padding = "periodic";
-    num_heads = 8;
+    num_heads = 4;
+    # attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    # use_attention_in_layer = [false, false, false, false];
+    # attention_embedding_dims = 256
+    # padding = "periodic";
+    # num_heads = 8;
 end;
 
 ##### Forecasting SI model #####
@@ -82,22 +92,31 @@ velocity = AttnParsConvNextUNet(
 );
 
 
-for diffusion_multiplier = [0.5f0];
-    num_generator_steps = 50
+for diffusion_multiplier = [0.01f0];
+    num_generator_steps = 100
     # Define interpolant and diffusion coefficients
     # diffusion_multiplier = 0.5f0;
     interpolant_multiplier = 0.5f0;
 
 
-    gamma = t -> interpolant_multiplier.* (1f0 .- t);
-    dgamma_dt = t -> -1f0 .* interpolant_multiplier; #ones(size(t)) .* diffusion_multiplier;
-    diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+    # gamma = t -> interpolant_multiplier.* (1f0 .- t);
+    # dgamma_dt = t -> -1f0 .* interpolant_multiplier; #ones(size(t)) .* diffusion_multiplier;
+    # diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+
+    # Define interpolant and diffusion coefficients
+    diffusion_multiplier = 0.01f0;
+    
+    gamma = t -> diffusion_multiplier.* (1f0 .- t);
+    dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+    diffusion_coefficient = t -> gamma(t); #diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
 
     alpha = t -> 1f0 .- t;
     dalpha_dt = t -> -1f0;
 
     beta = t -> t.^2;
     dbeta_dt = t -> 2f0 .* t;
+    # beta = t -> t;
+    # dbeta_dt = t -> 1f0; #2f0 .* t;
 
     # Initialise the SI model
     model = FollmerStochasticInterpolant(
@@ -118,6 +137,7 @@ for diffusion_multiplier = [0.5f0];
     elseif test_case == "turbulence_in_periodic_box"
         # best_model = "checkpoint_epoch_60"
         best_model = "best_model"
+        best_model = "checkpoint_epoch_850"
         ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
     end;
 
@@ -170,13 +190,13 @@ diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .-
 # gamma = t -> interpolant_multiplier .* sqrt.(2f0 .*t .* (1f0 .- t));
 # dgamma_dt = t -> -1f0 .* interpolant_multiplier; #ones(size(t)) .* diffusion_multiplier;
 # diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
-num_steps = 10;
+num_steps = 100;
 
 alpha = t -> 1f0 .- t; 
 dalpha_dt = t -> -1f0;
 
-beta = t -> t.^2;
-dbeta_dt = t -> 2f0 .* t;
+beta = t -> t;
+dbeta_dt = t -> 1f0 #2f0 .* t;
 
 
 
@@ -213,7 +233,7 @@ x = sqrt.(test_I[:, :, 1, :, 1].^2 + test_I[:, :, 2, :, 1].^2);
 #     "interpolant" * ".gif",
 #     ["True", ]
 # )
-
+using Plots
 energy_true = compute_total_energy(test_I);
 true_energy = []
 pred = []

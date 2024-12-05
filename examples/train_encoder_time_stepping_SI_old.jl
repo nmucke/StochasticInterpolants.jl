@@ -27,7 +27,6 @@ Random.seed!(rng, 0);
 
 # Get the device determined by Lux
 dev = gpu_device();
-
 cpu_dev = LuxCPUDevice();
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
@@ -48,34 +47,55 @@ num_train = size(trainset, 5);
 num_steps = size(trainset, 4);
 H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
+
+# Create a gif
+# x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
+# x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
+# x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
+# x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
+# x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
+# x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
+# x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
+# x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
+
+# create_gif(
+#     (x1, x2, x3, x4, x5, x6, x7, x8), 
+#     "HF.gif", 
+#     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+# )
+
 ##### Hyperparameters #####
-continue_training = false;
-model_base_dir = "trained_models/";
-model_name = "encoder_forecasting_model";
+# model_config = YAML.load_file("configs/neural_networks/$test_case.yml");
 
-if continue_training
-    checkpoint_manager = CheckpointManager(
-        test_case, model_name; base_folder=model_base_dir
-    );
+len_history = 3; #2
 
-    config = checkpoint_manager.neural_network_config("trained_models/$test_case/$model_name");
-else
-    config = YAML.load_file("configs/neural_networks/$test_case.yml");
-    
-    checkpoint_manager = CheckpointManager(
-        test_case, model_name; 
-        neural_network_config=config, 
-        data_config=YAML.load_file("configs/test_cases/$test_case.yml"),
-        base_folder=model_base_dir
-    )
-end;
-
-
-trainset = prepare_data_for_time_stepping(
+trainset_init_distribution, trainset_target_distribution, trainset_pars_distribution = prepare_data_for_time_stepping(
     trainset,
     trainset_pars;
-    len_history=config["model_args"]["len_history"]
+    len_history=len_history
 );
+
+embedding_dims = 128; #256;
+learning_rate = T(1e-4);
+batch_size = 8;
+num_epochs = 1000;
+channels = [16, 32, 64, 128];
+weight_decay = T(1e-6);
+projection = nothing #project_onto_divergence_free;
+if test_case == "transonic_cylinder_flow"
+    attention_type = "linear"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [true, true, true, true]
+    attention_embedding_dims = 32;
+    padding = "constant";
+    num_heads = 4;
+elseif test_case == "turbulence_in_periodic_box"
+    attention_type = "DiT"; # "linear" or "standard" or "DiT"
+    use_attention_in_layer = [false, false, false, false];
+    attention_embedding_dims = 128
+    padding = "periodic";
+    num_heads = 8;
+end;
+projection = nothing #project_onto_divergence_free;
 
 ##### Forecasting SI model #####
 # Define the velocity model
@@ -83,53 +103,78 @@ trainset = prepare_data_for_time_stepping(
 velocity = AttnParsConvNextUNet(
     (H, W); 
     in_channels=C, 
-    channels=config["model_args"]["channels"], 
-    embedding_dims=config["model_args"]["embedding_dims"], 
+    channels=channels, 
+    embedding_dims=embedding_dims, 
     pars_dim=num_pars,
-    len_history=config["model_args"]["len_history"],
-    attention_type=config["model_args"]["attention_type"],
-    use_attention_in_layer=config["model_args"]["use_attention_in_layer"],
-    padding=config["model_args"]["padding"],
-    attention_embedding_dims=config["model_args"]["attention_embedding_dims"],
-    num_heads=config["model_args"]["num_heads"],
+    len_history=len_history,
+    attention_type=attention_type,
+    use_attention_in_layer=use_attention_in_layer,
+    padding=padding,
+    attention_embedding_dims=attention_embedding_dims,
+    num_heads=num_heads,
 );
-encoder = velocity;
+encoder = AttnParsConvNextUNet(
+    (H, W); 
+    in_channels=C, 
+    channels=channels, 
+    embedding_dims=embedding_dims, 
+    pars_dim=num_pars,
+    len_history=len_history,
+    attention_type=attention_type,
+    use_attention_in_layer=use_attention_in_layer,
+    padding=padding,
+    attention_embedding_dims=attention_embedding_dims,
+    num_heads=num_heads,
+);
 
-# Get Interpolant
-interpolant = get_interpolant(
-    config["interpolant_args"]["alpha"],
-    config["interpolant_args"]["beta"],
-    config["interpolant_args"]["gamma"],
-    T(config["interpolant_args"]["gamma_multiplier"]),
-);
+# Define interpolant and diffusion coefficients
+diffusion_multiplier = 0.05f0;
 
-# Get diffusion coefficient
-diffusion_coefficient = get_diffusion_coefficient(
-    config["diffusion_args"]["type"],
-    T(config["diffusion_args"]["multiplier"]),
-);
+# gamma = t -> diffusion_multiplier.* (1f0 .- t);
+# dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+# diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+
+gamma = t -> diffusion_multiplier .* sqrt.(2f0 .* t .* (1f0 .- t));
+dgamma_dt = t -> (1f0 .- 2f0 .* t)./(sqrt.(2f0) .* sqrt.(-(-1f0 .+ t) .* t)); #-1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
+diffusion_coefficient = t -> gamma(t); #sqrt.((3f0 .- t) .* (1f0 .- t));
+
+
+alpha = t -> 1f0 .- t;
+dalpha_dt = t -> -1f0;
+
+beta = t -> t.^2;
+dbeta_dt = t -> 2f0 .* t;
 
 # Initialise the SI model
 model = EncoderFollmerStochasticInterpolant(
-    velocity, encoder, interpolant;
+    velocity, encoder, 
+    Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
     diffusion_coefficient=diffusion_coefficient,
-    projection=config["model_args"]["projection"],
+    projection=projection,
     dev=dev
 );
-##### Optimizer #####
-opt = Optimisers.AdamW(
-    T(config["optimizer_args"]["learning_rate"]), 
-    (0.9f0, 0.99f0), 
-    T(config["optimizer_args"]["weight_decay"])
-);
+ps, st = Lux.setup(rng, model) .|> dev;
 
-##### Load model #####
+model_save_dir = "trained_models/$test_case";
+
+##### Optimizer #####
+opt = Optimisers.AdamW(learning_rate, (0.9f0, 0.99f0), weight_decay);
+opt_state = Optimisers.setup(opt, ps);
+
+##### Load checkpoint #####
+continue_training = true;
 if continue_training
-    weights_and_states = checkpoint_manager.load_model();
-    ps, st, opt_state = weights_and_states .|> dev;
-else
-    ps, st = Lux.setup(rng, model) .|> dev;
-    opt_state = Optimisers.setup(opt, ps);
+    if test_case == "transonic_cylinder_flow"
+        best_model = "checkpoint_epoch_10"
+        ps, st, opt_state = load_checkpoint("trained_models/transonic_cylinder_flow/$best_model.bson") .|> dev;
+    elseif test_case == "incompressible_flow"
+        best_model = "best_incompressible_model"
+        ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
+    elseif test_case == "turbulence_in_periodic_box"
+        # best_model = "best_model"
+        best_model = "checkpoint_epoch_150"
+        ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
+    end;
 end;
     
 ##### Train stochastic interpolant #####
@@ -138,10 +183,15 @@ ps, st = train_stochastic_interpolant(
     ps=ps,
     st=st,
     opt_state=opt_state,
-    trainset=trainset, 
-    testset=(state=testset, pars=testset_pars),
-    checkpoint_manager=checkpoint_manager,
-    training_args=config["training_args"],
+    trainset_target_distribution=trainset_target_distribution,
+    trainset_init_distribution=trainset_init_distribution,
+    trainset_pars_distribution=trainset_pars_distribution,
+    testset=testset,
+    testset_pars=testset_pars,
+    num_test_paths=4,
+    model_save_dir=model_save_dir,
+    num_epochs=num_epochs,
+    batch_size=batch_size,
     normalize_data=normalize_data,
     mask=mask,  
     rng=rng,

@@ -76,6 +76,8 @@ function FollmerStochasticInterpolant(
             return -2f0 .* x_0[:, :, :, end, :], st
         end
 
+        # return vel_t, st
+
         out = (1f0 .+ 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0[:, :, :, end, :])
 
         return out, st
@@ -184,15 +186,17 @@ function LatentFollmerStochasticInterpolant(
             return -2f0 .* x_0, st
         end
 
+        # return vel_t, st
+
         out = (1f0 + 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0)
 
         return out, st
 
-        # A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
-        # A = 1 ./ A;
-        # c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
-        # score = A .* (beta(t) .* vel_t .- c)
-        # return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
+        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        A = 1 ./ A;
+        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
+        score = A .* (beta(t) .* vel_t .- c)
+        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
     end
 
     # Loss including the score network

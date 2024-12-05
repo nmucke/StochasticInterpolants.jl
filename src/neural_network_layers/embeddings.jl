@@ -56,3 +56,26 @@ function sinusoidal_embedding(
     return dropdims(embeddings, dims=(1, 2)) #embeddings
 end
 
+
+"""
+    ViPosEmbedding(embedding_size, number_patches; init = randn32)
+
+Positional embedding layer used by many vision transformer-like models.
+"""
+@kwdef @concrete struct ViPosEmbedding <: Lux.AbstractExplicitLayer
+    embedding_size::Int
+    number_patches::Int
+    init = randn32
+end
+
+@inline ViPosEmbedding(embedding_size::Int, number_patches::Int; init=randn32) = ViPosEmbedding(
+    embedding_size, number_patches, init)
+
+function LuxCore.initialparameters(rng::AbstractRNG, v::ViPosEmbedding)
+    return (; vectors=v.init(rng, v.embedding_size, v.number_patches))
+end
+
+@inline (v::ViPosEmbedding)(x, ps, st) = x .+ ps.vectors, st
+
+
+

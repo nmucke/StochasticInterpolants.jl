@@ -211,17 +211,3 @@ function VAE_wrapper(
 
     return VAE_wrapper(encode, decode, autoencoder.latent_dimensions)
 end
-
-
-# function (VAE::VariationalAutoencoder)(
-#     x, ps::NamedTuple, st::NamedTuple
-# )
-#     (x_mean, x_std), st_new = VAE.encoder(x, ps.encoder, st.encoder)
-#     @set! st.encoder = st_new
-
-#     x, st_new = VAE.decoder(x_mean, ps.decoder, st.decoder)
-#     @set! st.decoder = st_new
-
-#     return x, st    
-# end
-

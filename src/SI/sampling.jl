@@ -403,7 +403,6 @@ function forecasting_sde_sampler(
     timesteps = LinRange(0.0f0, 1.0f0, num_steps)
     dt = Float32.(timesteps[2] - timesteps[1]) |> dev
 
-
     if typeof(model) == LatentFollmerStochasticInterpolant
         (H, W, C, len_history, batch_size) = size(x_0)
         (L_H, L_W, L_C) = model.autoencoder.latent_dimensions

@@ -1,0 +1,3 @@
+Model saved at epoch: 425
+test_pathwise_MSE: 0.09680786616239989
+test_mean_MSE: 0.09669072189299338
