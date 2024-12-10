@@ -76,21 +76,12 @@ trainset = prepare_data_for_time_stepping(
     len_history=config["model_args"]["len_history"]
 );
 
+
 ##### Forecasting SI model #####
 # Define the velocity model
-# velocity = DitParsConvNextUNet(
-velocity = AttnParsConvNextUNet(
-    (H, W); 
-    in_channels=C, 
-    channels=config["model_args"]["channels"], 
-    embedding_dims=config["model_args"]["embedding_dims"], 
-    pars_dim=num_pars,
-    len_history=config["model_args"]["len_history"],
-    attention_type=config["model_args"]["attention_type"],
-    use_attention_in_layer=config["model_args"]["use_attention_in_layer"],
-    padding=config["model_args"]["padding"],
-    attention_embedding_dims=config["model_args"]["attention_embedding_dims"],
-    num_heads=config["model_args"]["num_heads"],
+velocity = get_SI_neural_network(;
+    image_size=(H, W),
+    model_params=config["model_args"]
 );
 
 # Get Interpolant
@@ -107,12 +98,18 @@ diffusion_coefficient = get_diffusion_coefficient(
     T(config["diffusion_args"]["multiplier"]),
 );
 
+if config["model_args"]["projection"] == "divergence_free"
+    projection = project_onto_divergence_free;
+else
+    projection = nothing;
+end;
+
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
     velocity; 
     interpolant=interpolant, #Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
     diffusion_coefficient=diffusion_coefficient,
-    projection=config["model_args"]["projection"],
+    projection=projection,
     dev=dev
 );
 ##### Optimizer #####

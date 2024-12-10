@@ -11,7 +11,7 @@ training_args:
     - 9
   time_step_info:
     start_time: 500
-    num_steps: 250
+    num_steps: 200
     skip_steps: 4
 normalize_data: false
 test_args:
@@ -19,7 +19,7 @@ test_args:
     ids:
       - 10
     time_step_info:
-      start_time: 550
+      start_time: 540
       num_steps: 50
       skip_steps: 4
 norm_mean:

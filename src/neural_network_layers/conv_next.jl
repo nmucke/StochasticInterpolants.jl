@@ -98,7 +98,7 @@ function multiple_conv_next_blocks_no_pars(;
         )
     ) do x
         x = block_1(x)
-        @return block_2()
+        @return block_2(x)
     end
 end
 
@@ -129,7 +129,6 @@ function conv_next_block(;
     out_channels::Int,
     multiplier::Int = 1,
     pars_embed_dim::Int = 1,
-    imsize::Tuple{Int, Int} = (64, 128),
     padding="constant"
 )
 
@@ -179,7 +178,6 @@ function multiple_conv_next_blocks(;
     out_channels::Int,
     multiplier::Int = 1,
     embedding_dims::Int = 1,
-    imsize::Tuple{Int, Int} = (64, 128),
     padding="constant"
 )
     @compact(
@@ -188,7 +186,6 @@ function multiple_conv_next_blocks(;
             out_channels=out_channels, 
             multiplier=multiplier,
             pars_embed_dim=embedding_dims,
-            imsize=imsize,
             padding=padding
         ),
         block_2 = conv_next_block(
@@ -196,24 +193,306 @@ function multiple_conv_next_blocks(;
             out_channels=out_channels, 
             multiplier=multiplier,
             pars_embed_dim=embedding_dims,
-            imsize=imsize,
             padding=padding
         )
     ) do x
         x, t = x
-        # @return block_1((x, t))
         x = block_1((x, t))
         @return block_2((x, t))
     end
 end
 
 ###############################################################################
+# Conv Next UNet with Pars
+###############################################################################
+
+"""
+ConvNextUNetWithPars(
+        image_size::Tuple{Int, Int},
+        channels::Vector{Int} = [32, 64, 96, 128],
+        block_depth::Int = 2,
+        min_freq::Float32 = 1.0f0,
+        max_freq::Float32 = 1000.0f0,
+        embedding_dims::Int = 32
+    )
+
+Create a conditional U-Net model with the given image size, number of channels,
+block depth, frequency range, and embedding dimensions.
+"""
+struct ConvNextUNetWithPars <: Lux.AbstractExplicitContainerLayer{
+    (
+        :conv_out, :conv_down_blocks, 
+        :down_blocks, :bottleneck1, :bottleneck2, 
+        :conv_up_blocks, :up_blocks, :attn_down_blocks,
+        :bottleneck_attn, :attn_up_blocks
+    )
+}
+    # layes::LayersType
+    conv_out::Lux.AbstractExplicitLayer
+    conv_down_blocks::Lux.AbstractExplicitLayer
+    down_blocks::Lux.AbstractExplicitLayer
+    bottleneck1::Lux.AbstractExplicitLayer
+    bottleneck2::Lux.AbstractExplicitLayer
+    conv_up_blocks::Lux.AbstractExplicitLayer
+    up_blocks::Lux.AbstractExplicitLayer
+    attn_down_blocks::Lux.AbstractExplicitLayer
+    bottleneck_attn::Lux.AbstractExplicitLayer
+    attn_up_blocks::Lux.AbstractExplicitLayer
+end
+
+
+function ConvNextUNetWithPars(;
+    image_size=(128, 128),
+    out_channels=3,
+    channels=[32, 64, 96, 128], 
+    attention_type="linear",
+    use_attention_in_layer=[false, false, true, true],
+    attention_embedding_dims=32,
+    embedding_dims=32,
+    num_heads=4,
+    padding="periodic"
+)
+
+    attention_layer(imsize, in_channels, embed_dim, num_heads) = get_attention_layer(
+        attention_type, imsize, in_channels, embed_dim, num_heads, embedding_dims
+    )
+
+    multiplier = 2
+
+    conv_down_blocks = []
+    attn_down_blocks = []
+    down_blocks = []
+    for i in 1:(length(channels) - 1)
+        imsize = div.(image_size, 2^(i - 1))
+
+        push!(
+            conv_down_blocks, 
+            multiple_conv_next_blocks(
+                in_channels=channels[i], 
+                out_channels=channels[i + 1], 
+                multiplier=multiplier,
+                embedding_dims=embedding_dims,
+                padding=padding
+            )
+        )
+
+        if use_attention_in_layer[i]
+            push!(attn_down_blocks, attention_layer(
+                imsize, channels[i + 1], attention_embedding_dims, num_heads,
+            ))
+        else
+            push!(attn_down_blocks, StateParsIdentity())
+        end
+
+        push!(down_blocks, Conv(
+            (4, 4), 
+            (channels[i + 1] => channels[i + 1]); 
+            use_bias=true,
+            pad=1,
+            stride=2
+        ))
+    end
+
+    conv_down_blocks = Chain(conv_down_blocks...)#; disable_optimizations=true)
+    attn_down_blocks = Chain(attn_down_blocks...)#; disable_optimizations=true)
+    down_blocks = Chain(down_blocks...)#; disable_optimizations=true)
+
+    imsize = div.(image_size, 2^(length(channels) - 1))
+
+    bottleneck1 = conv_next_block(
+        in_channels=channels[end], 
+        out_channels=channels[end],
+        multiplier=multiplier,
+        pars_embed_dim=embedding_dims,
+        padding=padding
+    )
+
+
+    bottleneck_attn = attention_layer(
+        imsize, channels[end], attention_embedding_dims, num_heads
+    )
+
+    bottleneck2 = conv_next_block(
+        in_channels=channels[end], 
+        out_channels=channels[end],
+        multiplier=multiplier,
+        pars_embed_dim=embedding_dims,
+        padding=padding
+    )
+
+    reverse!(channels)
+    reverse!(use_attention_in_layer)
+    conv_up_blocks = []
+    attn_up_blocks = []
+    up_blocks = []
+    for i in 1:(length(channels) - 1)
+        push!(up_blocks, ConvTranspose(
+            (4, 4), 
+            (channels[i] => channels[i]); 
+            use_bias=true,
+            pad=1,
+            stride=2
+        ))
+        
+        imsize = div.(image_size, 2^(length(channels) - i - 1))
+        push!(
+            conv_up_blocks, 
+            multiple_conv_next_blocks(
+                in_channels=channels[i] * 2, 
+                out_channels=channels[i + 1], 
+                multiplier=multiplier,
+                embedding_dims=embedding_dims,
+                padding=padding
+            )
+        )
+
+        if use_attention_in_layer[i]
+            push!(attn_up_blocks, attention_layer(
+                imsize, channels[i + 1], attention_embedding_dims, num_heads
+            ))
+        else
+            push!(attn_up_blocks, StateParsIdentity())
+        end
+    end
+
+    conv_up_blocks = Chain(conv_up_blocks...)
+    attn_up_blocks = Chain(attn_up_blocks...)
+    up_blocks = Chain(up_blocks...)
+
+    conv_out = Chain(
+        conv_next_block_no_pars(
+            in_channels=channels[end], 
+            out_channels=channels[end], 
+            multiplier=multiplier,
+            padding=padding
+        ),
+        Conv((1, 1), (channels[end] => out_channels); use_bias=false)
+    )
+
+    return ConvNextUNetWithPars(
+        conv_out, conv_down_blocks, down_blocks, bottleneck1, 
+        bottleneck2, conv_up_blocks, up_blocks, attn_down_blocks,
+        bottleneck_attn, attn_up_blocks
+    )
+end
+
+
+function (conv_next_unet::ConvNextUNetWithPars)(
+    x, ps::NamedTuple, st::NamedTuple
+)
+
+    x, t_emb = x
+    
+    skips = (x, )
+    for i in 1:length(conv_next_unet.conv_down_blocks)
+
+        conv_layer_name = Symbol(:layer_, i)
+        x, new_st = conv_next_unet.conv_down_blocks[i](
+            (x, t_emb), ps.conv_down_blocks[conv_layer_name], st.conv_down_blocks[conv_layer_name]
+        )  
+        @set! st.conv_down_blocks[conv_layer_name] = new_st
+
+        x, new_st = conv_next_unet.attn_down_blocks[i](
+            (x, t_emb), ps.attn_down_blocks[conv_layer_name], st.attn_down_blocks[conv_layer_name]
+        )
+        @set! st.attn_down_blocks[conv_layer_name] = new_st
+
+        skips = (skips..., x)
+
+        x, new_st = conv_next_unet.down_blocks[i](
+            x, ps.down_blocks[conv_layer_name], st.down_blocks[conv_layer_name]
+        )
+        @set! st.down_blocks[conv_layer_name] = new_st
+
+    end
+
+    x, new_st = conv_next_unet.bottleneck1(
+        (x, t_emb), ps.bottleneck1, st.bottleneck1
+    )
+    @set! st.bottleneck1 = new_st
+
+    x, new_st = conv_next_unet.bottleneck_attn(
+        (x, t_emb), ps.bottleneck_attn, st.bottleneck_attn
+    )
+    @set! st.bottleneck_attn = new_st
+
+    x, new_st = conv_next_unet.bottleneck2(
+        (x, t_emb), ps.bottleneck2, st.bottleneck2
+    )
+    @set! st.bottleneck2 = new_st
+
+
+    for i in 1:length(conv_next_unet.conv_up_blocks)
+        layer_name = Symbol(:layer_, i)
+
+        x, new_st = conv_next_unet.up_blocks[i](
+            x, ps.up_blocks[layer_name], st.up_blocks[layer_name]
+        )
+        @set! st.up_blocks[layer_name] = new_st
+
+        x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+        # x = x + skips[end-i+1]
+              
+        x, new_st = conv_next_unet.conv_up_blocks[i](
+            (x, t_emb), ps.conv_up_blocks[layer_name], st.conv_up_blocks[layer_name]
+        )
+        @set! st.conv_up_blocks[layer_name] = new_st
+        
+        x, new_st = conv_next_unet.attn_up_blocks[i](
+            (x, t_emb), ps.attn_up_blocks[layer_name], st.attn_up_blocks[layer_name]
+        )
+        @set! st.attn_up_blocks[layer_name] = new_st
+        
+    end
+
+    x, new_st = conv_next_unet.conv_out(x, ps.conv_out, st.conv_out)
+    @set! st.conv_out = new_st
+
+    return x, st
+end
+
+
+
+###############################################################################
 # Conv Next UNet without Pars
 ###############################################################################
 
-function ConvNextUNetNoPars(
-    image_size::Tuple{Int, Int}; 
-    in_channels::Int = 3,
+"""
+ConvNextUNetNoPars(
+        image_size::Tuple{Int, Int},
+        channels::Vector{Int} = [32, 64, 96, 128],
+        block_depth::Int = 2,
+        min_freq::Float32 = 1.0f0,
+        max_freq::Float32 = 1000.0f0,
+    )
+
+Create a conditional U-Net model with the given image size, number of channels,
+block depth, frequency range, and embedding dimensions.
+"""
+struct ConvNextUNetNoPars <: Lux.AbstractExplicitContainerLayer{
+    (
+        :conv_out, :conv_down_blocks, 
+        :down_blocks, :bottleneck1, :bottleneck2, 
+        :conv_up_blocks, :up_blocks, :attn_down_blocks,
+        :bottleneck_attn, :attn_up_blocks
+    )
+}
+    # layes::LayersType
+    conv_out::Lux.AbstractExplicitLayer
+    conv_down_blocks::Lux.AbstractExplicitLayer
+    down_blocks::Lux.AbstractExplicitLayer
+    bottleneck1::Lux.AbstractExplicitLayer
+    bottleneck2::Lux.AbstractExplicitLayer
+    conv_up_blocks::Lux.AbstractExplicitLayer
+    up_blocks::Lux.AbstractExplicitLayer
+    attn_down_blocks::Lux.AbstractExplicitLayer
+    bottleneck_attn::Lux.AbstractExplicitLayer
+    attn_up_blocks::Lux.AbstractExplicitLayer
+end
+
+function ConvNextUNetNoPars(;
+    image_size = (128, 128), 
+    out_channels = 3,
     channels=[32, 64, 96, 128], 
     attention_type="linear",
     use_attention_in_layer=[false, false, true, true],
@@ -222,15 +501,233 @@ function ConvNextUNetNoPars(
     padding="periodic"
 )
 
+    attention_layer(imsize, in_channels, embed_dim, num_heads) = get_attention_layer(
+        attention_type, imsize, in_channels, embed_dim, num_heads, nothing
+    )
+
+    multiplier = 2
 
     conv_down_blocks = []
     attn_down_blocks = []
     down_blocks = []
-    return @compact(
+    for i in 1:(length(channels) - 1)
+        imsize = div.(image_size, 2^(i - 1))
 
+        push!(
+            conv_down_blocks, 
+            multiple_conv_next_blocks_no_pars(
+                in_channels=channels[i], 
+                out_channels=channels[i + 1], 
+                multiplier=multiplier,
+                padding=padding
+            )
         )
-    ) do x
+
+        if use_attention_in_layer[i]
+            push!(attn_down_blocks, attention_layer(
+                imsize, channels[i + 1], attention_embedding_dims, num_heads,
+            ))
+        else
+            push!(attn_down_blocks, StateParsIdentity())
+        end
+
+        push!(down_blocks, Conv(
+            (4, 4), 
+            (channels[i + 1] => channels[i + 1]); 
+            use_bias=true,
+            pad=1,
+            stride=2
+        ))
     end
+
+    conv_down_blocks = Chain(conv_down_blocks...)#; disable_optimizations=true)
+    attn_down_blocks = Chain(attn_down_blocks...)#; disable_optimizations=true)
+    down_blocks = Chain(down_blocks...)#; disable_optimizations=true)
+
+    imsize = div.(image_size, 2^(length(channels) - 1))
+
+    bottleneck1 = conv_next_block_no_pars(
+        in_channels=channels[end], 
+        out_channels=channels[end],
+        multiplier=multiplier,
+        padding=padding
+    )
+
+
+    bottleneck_attn = attention_layer(
+        imsize, channels[end], attention_embedding_dims, num_heads
+    )
+
+    bottleneck2 = conv_next_block_no_pars(
+        in_channels=channels[end], 
+        out_channels=channels[end],
+        multiplier=multiplier,
+        padding=padding
+    )
+
+    reverse!(channels)
+    reverse!(use_attention_in_layer)
+    conv_up_blocks = []
+    attn_up_blocks = []
+    up_blocks = []
+    for i in 1:(length(channels) - 1)
+        push!(up_blocks, ConvTranspose(
+            (4, 4), 
+            (channels[i] => channels[i]); 
+            use_bias=true,
+            pad=1,
+            stride=2
+        ))
+        
+        imsize = div.(image_size, 2^(length(channels) - i - 1))
+        push!(
+            conv_up_blocks, 
+            multiple_conv_next_blocks_no_pars(
+                in_channels=channels[i] * 2, 
+                out_channels=channels[i + 1], 
+                multiplier=multiplier,
+                padding=padding
+            )
+        )
+
+        if use_attention_in_layer[i]
+            push!(attn_up_blocks, attention_layer(
+                imsize, channels[i + 1], attention_embedding_dims, num_heads
+            ))
+        else
+            push!(attn_up_blocks, StateParsIdentity())
+        end
+    end
+
+    conv_up_blocks = Chain(conv_up_blocks...)
+    attn_up_blocks = Chain(attn_up_blocks...)
+    up_blocks = Chain(up_blocks...)
+
+    conv_out = Chain(
+        conv_next_block_no_pars(
+            in_channels=channels[end], 
+            out_channels=channels[end], 
+            multiplier=multiplier,
+            padding=padding
+        ),
+        Conv((1, 1), (channels[end] => out_channels); use_bias=false)
+    )
+
+    return ConvNextUNetNoPars(
+        conv_out, conv_down_blocks, down_blocks, bottleneck1, 
+        bottleneck2, conv_up_blocks, up_blocks, attn_down_blocks,
+        bottleneck_attn, attn_up_blocks
+    )
+end
+
+
+function (conv_next_unet::ConvNextUNetNoPars)(
+    x, ps::NamedTuple, st::NamedTuple
+)
+
+    skips = (x, )
+    for i in 1:length(conv_next_unet.conv_down_blocks)
+
+        conv_layer_name = Symbol(:layer_, i)
+        x, new_st = conv_next_unet.conv_down_blocks[i](
+            x, ps.conv_down_blocks[conv_layer_name], st.conv_down_blocks[conv_layer_name]
+        )  
+
+        @set! st.conv_down_blocks[conv_layer_name] = new_st
+
+        x, new_st = conv_next_unet.attn_down_blocks[i](
+            (x, nothing), ps.attn_down_blocks[conv_layer_name], st.attn_down_blocks[conv_layer_name]
+        )
+        @set! st.attn_down_blocks[conv_layer_name] = new_st
+
+        skips = (skips..., x)
+
+        x, new_st = conv_next_unet.down_blocks[i](
+            x, ps.down_blocks[conv_layer_name], st.down_blocks[conv_layer_name]
+        )
+        @set! st.down_blocks[conv_layer_name] = new_st
+
+    end
+
+    x, new_st = conv_next_unet.bottleneck1(
+        x, ps.bottleneck1, st.bottleneck1
+    )
+    @set! st.bottleneck1 = new_st
+
+    x, new_st = conv_next_unet.bottleneck_attn(
+        (x, nothing), ps.bottleneck_attn, st.bottleneck_attn
+    )
+    @set! st.bottleneck_attn = new_st
+
+    x, new_st = conv_next_unet.bottleneck2(
+        x, ps.bottleneck2, st.bottleneck2
+    )
+    @set! st.bottleneck2 = new_st
+
+    for i in 1:length(conv_next_unet.conv_up_blocks)
+        layer_name = Symbol(:layer_, i)
+
+        x, new_st = conv_next_unet.up_blocks[i](
+            x, ps.up_blocks[layer_name], st.up_blocks[layer_name]
+        )
+        @set! st.up_blocks[layer_name] = new_st
+
+        x = cat(x, skips[end-i+1]; dims=3) # cat on channel  
+        # x = x + skips[end-i+1]
+              
+        x, new_st = conv_next_unet.conv_up_blocks[i](
+            x, ps.conv_up_blocks[layer_name], st.conv_up_blocks[layer_name]
+        )
+        @set! st.conv_up_blocks[layer_name] = new_st
+        
+        x, new_st = conv_next_unet.attn_up_blocks[i](
+            (x, nothing), ps.attn_up_blocks[layer_name], st.attn_up_blocks[layer_name]
+        )
+        @set! st.attn_up_blocks[layer_name] = new_st
+        
+    end
+
+    x, new_st = conv_next_unet.conv_out(x, ps.conv_out, st.conv_out)
+    @set! st.conv_out = new_st
+
+    return x, st
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ###############################################################################

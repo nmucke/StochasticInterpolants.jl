@@ -10,15 +10,19 @@ training_args:
   test_frequency: 25
 
 model_args:
+  model_type: "conv_next_u_net"
+  in_channels: 2
+  out_channels: 2
   embedding_dims: 128
   channels: [16, 32, 64, 128]
-  attention_type: "DiT" # "linear" or "standard" or "DiT"
+  attention_type: "standard" # "linear" or "standard" or "DiT"
   use_attention_in_layer: [false, false, false, false] # [true, true, true, true];
   attention_embedding_dims: 64
   num_heads: 4
-  projection: null
+  projection: "divergence_free"
   len_history: 2
   padding: "periodic"
+  pars_dim: 0
 
 optimizer_args:
   learning_rate: 1.0e-4

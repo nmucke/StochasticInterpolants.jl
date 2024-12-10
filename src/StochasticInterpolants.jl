@@ -22,6 +22,7 @@ include("neural_network_layers/transformer.jl")
 include("neural_network_layers/autoencoder.jl")
 include("neural_network_layers/diffusion_transformer.jl")
 include("neural_network_layers/neural_network_utils.jl")
+include("neural_network_layers/full_networks.jl")
 
 export parameter_diffusion_transformer_block
 
@@ -31,6 +32,7 @@ export Identity
 export StateParsIdentity
 export get_padding
 export get_attention_layer
+export get_t_pars_embedding
 
 export transform_to_nothing
 export LinearMultiHeadSelfAttention
@@ -39,25 +41,21 @@ export MultiHeadSelfAttention
 export residual_block
 export conv_next_block
 export conv_next_block_no_pars
-# export ConvNextDownBlock
-# export ConvNextUpBlock
+export get_history_state_embedding
+export ConvNextUNetNoPars
+export ConvNextUNetWithPars
 export multiple_conv_next_blocks
-# export UNet
-# export ConditionalUNet
-# export UpBlock, DownBlock
 export sinusoidal_embedding
 export modulate
 export patchify
 export unpatchify
 export reshape_modulation
 export DiffusionTransformerBlock
-# export VisionTransformerEncoder
 export FinalLayer
 export DiffusionTransformer
 export ConditionalDiffusionTransformer
 export ConvNextUNet
 export parameter_diffusion_transformer_block
-# export ParsConvNextUNet
 export SpatialAttention
 export DitParsConvNextUNet
 export AttnParsConvNextUNet
@@ -72,6 +70,8 @@ export Decoder
 export Autoencoder
 export VariationalAutoencoder
 export VAE_wrapper
+export get_SI_neural_network
+export get_encoder_neural_network
 
 
 include("unet_transformer.jl")
