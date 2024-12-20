@@ -4,7 +4,6 @@ ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
 using StochasticInterpolants
 using Lux
 using Random
-using NPZ
 using LuxCUDA
 using Optimisers
 using FileIO
@@ -12,6 +11,8 @@ using Statistics
 using Zygote
 using CUDA
 using Plots
+using YAML
+using OrderedCollections
 
 # For running on CPU.
 # Consider reducing the sizes of DNS, LES, and CNN layers if
@@ -30,12 +31,12 @@ dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "transonic_cylinder_flow";
+test_case = "kolmogorov";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_interpolation";
+test_args = "pars_low";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -59,24 +60,52 @@ testset = testset[:, :, :, :, 1];
 # testset = testset[:, :, :, test_ids];
 
 ##### Hyperparameters #####
+continue_training = false;
+model_base_dir = "trained_models/";
+model_name = "VAE";
 
-learning_rate = 1e-4;
-init_learning_rate = 1e-3;
-min_learning_rate = 1e-5;
-num_epochs = 500;
-batch_size = 8;
-weight_decay = 1e-8;
-num_latent_channels = 4;
+if continue_training
+    checkpoint_manager = CheckpointManager(
+        test_case, model_name; base_folder=model_base_dir
+    )
+
+    config = checkpoint_manager.neural_network_config("trained_models/$test_case/$model_name")
+else
+    config = YAML.load_file("configs/variational_autoencoders/$test_case.yml")
+    
+    checkpoint_manager = CheckpointManager(
+        test_case, model_name; 
+        neural_network_config=config, 
+        data_config=YAML.load_file("configs/test_cases/$test_case.yml"),
+        base_folder=model_base_dir
+    )
+end;
 
 ##### Autoencoder #####
-autoencoder = VariationalAutoencoder(C, (H, W), num_latent_channels, [32, 64, 128], "constant");
-ps, st = Lux.setup(rng, autoencoder) .|> dev;
+autoencoder = VariationalAutoencoder(
+    in_channels=config["model_args"]["in_channels"],
+    image_size=(H, W),
+    num_latent_channels=config["model_args"]["num_latent_channels"],
+    channels=config["model_args"]["channels"], 
+    padding=config["model_args"]["padding"],
+);
 
 ##### Optimizer #####
-opt = Optimisers.Adam(learning_rate, (0.9f0, 0.99f0), weight_decay);
-opt_state = Optimisers.setup(opt, ps);
+opt = Optimisers.AdamW(
+    T(config["optimizer_args"]["learning_rate"]), 
+    (0.9f0, 0.99f0), 
+    T(config["optimizer_args"]["weight_decay"])
+);
 
-ps, st, opt_state = load_checkpoint("transonic_VAE/checkpoint_epoch_10.bson") .|> dev;
+##### Load model #####
+continue_training = false;
+if continue_training
+    weights_and_states = checkpoint_manager.load_model();
+    ps, st, opt_state = weights_and_states .|> dev;
+else
+    ps, st = Lux.setup(rng, autoencoder) .|> dev;
+    opt_state = Optimisers.setup(opt, ps);
+end;
 
 ##### Loss #####
 loss_fn_VAE(x, model, ps, st) = begin
@@ -108,7 +137,10 @@ end;
 
 ##### Training #####
 best_loss = 1e8;
-for epoch in 1:num_epochs
+batch_size = config["training_args"]["batch_size"];
+recon_error_dict = OrderedDict();
+loss_vec = [];
+for epoch in 1:config["training_args"]["num_epochs"]
     running_loss = 0.0
 
     # Shuffle trainset
@@ -135,18 +167,19 @@ for epoch in 1:num_epochs
 
     running_loss /= floor(Int, size(trainset)[end] / batch_size)
 
-    # loss_vec = vcat(loss_vec, running_loss)
-
-    # plot(loss_vec)#, yaxis=:log)
-    # savefig("AE_training_loss.png")
+    loss_vec = vcat(loss_vec, running_loss)
+    fig = plot(loss_vec, yaxis=:log)
+    checkpoint_manager.save_figure(fig, "training_loss.png")
 
     if epoch % 1 == 0
         print("Loss Value after $epoch iterations: $running_loss \n")
     end
 
-
-    if epoch % 10 == 0
+    if epoch % config["training_args"]["test_frequency"] == 0
         # x = testset[:, :, :, 1:1+batch_size-1] |> dev
+
+        CUDA.reclaim()
+        GC.gc()
 
         testset = testset |> dev;
 
@@ -156,45 +189,68 @@ for epoch in 1:num_epochs
         x_recon, st = autoencoder.decode(latent_mean, ps, st_)
 
         create_gif(
-            (latent_mean[:, :, 1, :] |> cpu_dev, x_recon[:, :, 4, :] |> cpu_dev), 
-            "VAE.gif", 
-            ("latent", "recon")
+            (latent_mean[:, :, 1, :] |> cpu_dev, x_recon[:, :, 1, :] |> cpu_dev, testset[:, :, 1, :] |> cpu_dev), 
+            "$(checkpoint_manager.figures_dir)/$(epoch)_anim.mp4", 
+            ("latent", "recon", "true")
         )        
 
         recon_error = mean((testset - x_recon).^2)
         print("Reconstruction error: $recon_error \n")
         
         x_recon = x_recon |> cpu_dev;
+        testset = testset |> cpu_dev;
         x_recon_plot = sqrt.(x_recon[:, :, 1, 1].^2 .+ x_recon[:, :, 2, 1].^2)
-        heatmap(x_recon_plot)
-        savefig("VAE_test.png")
+        x_true_plot = sqrt.(testset[:, :, 1, 1].^2 .+ testset[:, :, 2, 1].^2)
+
+        p1 = heatmap(x_recon_plot)
+        p2 = heatmap(x_true_plot)
+        p_list = [p1, p2]
+        p = plot(p_list..., layout=(1, 2), size=(800, 400))
+        savefig("$(checkpoint_manager.figures_dir)/$(epoch)_recon.png")
 
         energy_true = compute_total_energy(testset) |> cpu_dev;
         energy_pred = compute_total_energy(x_recon) |> cpu_dev;
-
         plot(energy_true, color=:blue, label="True", linewidth=3)
         plot!(energy_pred, color=:red, label="Pred", linewidth=3)
-        energy_save_path = "VAE_energy.png"
-        savefig(energy_save_path)
+        savefig("$(checkpoint_manager.figures_dir)/$(epoch)_energy.png")
 
-        model_save_dir = "transonic_VAE"
+        energy_pred_latent = compute_total_energy(latent_mean) |> cpu_dev;
+        plot(energy_pred_latent, color=:blue, label="True", linewidth=3)
+        savefig("$(checkpoint_manager.figures_dir)/$(epoch)_latent_energy.png")
 
+        # Save model if it is the best so far
         if recon_error < best_loss
-            best_loss = recon_error
-            save_checkpoint(
-                ps=ps, 
-                st=st,
-                opt_st=opt_state,
-                output_dir=model_save_dir,
-                epoch=epoch
+            checkpoint_manager.save_model(ps, st, opt_state)
+            info_dict = OrderedDict(
+                "Model saved at epoch" => epoch,
+                "test_pathwise_MSE" => recon_error,
             )
+            checkpoint_manager.write_dict_to_txt_file(info_dict, "best_model_info.txt")
+
+            best_loss = recon_error
+            early_stop_counter = 0
         end
-
-        testset = testset |> cpu_dev;
-
     end
-    
+
+    CUDA.reclaim()
+    GC.gc()
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 testset = testset |> dev;

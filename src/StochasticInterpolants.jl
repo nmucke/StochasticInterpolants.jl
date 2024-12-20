@@ -94,12 +94,15 @@ export create_gif
 export save_checkpoint
 export load_checkpoint
 export CheckpointManager
+export load_model_weights
 
 # Data
 export load_transonic_cylinder_flow_data
 export load_incompressible_flow_data
 export load_turbulence_in_periodic_box_data
+export load_kolmogorov_data
 export prepare_data_for_time_stepping
+export prepare_latent_data
 export load_test_case_data
 
 # Preprocessing
@@ -114,6 +117,8 @@ export compute_temporal_frequency
 export compare_sde_pred_with_true
 export compare_ode_pred_with_true
 export compute_total_energy
+export compute_inner_product
+export compute_norm
 
 # Projections
 export divfunc
@@ -149,6 +154,7 @@ export sde_sampler
 export ode_sampler
 export SDE_runge_kutta
 export forecasting_sde_sampler
+export forecasting_latent_sde_sampler
 export forecasting_ode_sampler
 export SDE_heun
 export ODE_runge_kutta
@@ -160,18 +166,32 @@ export get_diffusion_coefficient
 # Interpolants
 export Interpolant
 export get_interpolant
+export get_alpha_series
+export get_beta_series
+export get_gamma_series
+export get_dalpha_series_dt
+export get_dbeta_series_dt
+export get_dgamma_series_dt
+export d_interpolant_energy_dt
+export compute_physics_consistent_interpolant_coefficients
+export interpolant_velocity
+export objective_function
+
 
 # Loss
 export get_loss
 export get_forecasting_loss
+export get_forecasting_from_gaussian_loss
 export get_physics_forecasting_loss
 export get_encoder_forecasting_loss
 
 # Training
 export train_stochastic_interpolant
+export train_stochastic_interpolant_for_closure
 
 # Time stepping
 export compute_multiple_SDE_steps
+export compute_multiple_latent_SDE_steps
 export compute_multiple_ODE_steps
 
 

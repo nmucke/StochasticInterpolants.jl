@@ -166,7 +166,7 @@ struct VariationalAutoencoder <: Lux.AbstractExplicitContainerLayer{
     image_size::Tuple
 end
 
-function VariationalAutoencoder(
+function VariationalAutoencoder(;
     in_channels::Int=3,
     image_size::Tuple=(128, 128),
     num_latent_channels=128,

@@ -59,7 +59,18 @@ function get_main_model_with_pars(;
             padding=model_params["padding"],
         )
     elseif model_params["model_type"] == "diffusion_transformer"
-        return 0
+        return DiffusionTransformer(;
+            image_size=image_size,
+            in_channels=model_params["in_channels"], 
+            out_channels=model_params["out_channels"],
+            patch_size=(model_params["patch_size"], model_params["patch_size"]),
+            embedding_dims=model_params["embedding_dims"], 
+            depth=model_params["depth"], 
+            num_heads=model_params["num_heads"],
+            mlp_ratio=model_params["mlp_ratio"], 
+            dropout_rate=model_params["dropout_rate"], 
+            embedding_dropout_rate=model_params["embedding_dropout_rate"],
+        )
     end
 end
 
@@ -87,8 +98,6 @@ function get_SI_neural_network(;
     model_params::Dict{Any, Any}
 )
 
-    history_state_embedding = 
-    
     if model_params["pars_dim"] > 0
         return @compact(
             hist_state_embedding = get_history_state_embedding(;

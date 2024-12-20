@@ -5,7 +5,10 @@
 *.jld2
 *.gif
 *.bson
+*.mp4
+*.txt
 
 data/
 
 tmp/
+

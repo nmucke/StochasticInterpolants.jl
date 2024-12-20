@@ -9,9 +9,15 @@ training_args:
     - 7
     - 8
     - 9
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
+    - 15
   time_step_info:
     start_time: 500
-    num_steps: 200
+    num_steps: 5
     skip_steps: 4
 normalize_data: false
 test_args:
@@ -27,9 +33,9 @@ norm_mean:
   - 1.422475315049354e-8
 parameter_dimensions: ~
 state_dimensions:
-  height: 128
+  height: 64
   channels: 2
-  width: 128
+  width: 64
 pars_max:
   - 1.0
 state_variables:
@@ -41,4 +47,4 @@ with_mask: false
 norm_std:
   - 0.7129140811183516
   - 0.6955684386129051
-data_folder: "data/periodic_box_turbulence_data_128.jld2"
+data_folder: "data/periodic_box_turbulence_data_64.jld2"

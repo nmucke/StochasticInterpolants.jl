@@ -224,6 +224,7 @@ function parameter_diffusion_transformer_block(;
 
         h = div(imsize[1], patch_size[1])
         w = div(imsize[2], patch_size[2])
+
         @return unpatchify(x, (h, w), patch_size, out_channels)
     end
 end
@@ -244,8 +245,8 @@ struct DiffusionTransformerBlock <: Lux.AbstractExplicitContainerLayer{
     layer_norm_1::Lux.LayerNorm
     layer_norm_2::Lux.LayerNorm
     attention::Lux.AbstractExplicitLayer
-    mlp::Chain
-    adaLN_modulation::Lux.Chain
+    mlp::Lux.Chain
+    adaLN_modulation::Lux.Dense
     hidden_size::Int
     #reshape_modulation::Function
 end
@@ -266,17 +267,13 @@ function DiffusionTransformerBlock(
     )
 
     mlp_hidden_dim = floor(Int, mlp_ratio * hidden_size)
-    mlp = Chain(
+    mlp = Lux.Chain(
         Lux.Dense(hidden_size => mlp_hidden_dim, NNlib.gelu),
         Lux.Dropout(0.1f0),
         Lux.Dense(mlp_hidden_dim => hidden_size),
     )
 
-    adaLN_modulation = Lux.Chain(
-        NNlib.gelu,
-        Lux.Dense(hidden_size => 6 * hidden_size),
-    )
-
+    adaLN_modulation = Lux.Dense(hidden_size => 6 * hidden_size)
 
     return DiffusionTransformerBlock(
         layer_norm_1, 
@@ -293,6 +290,8 @@ function (dit_block::DiffusionTransformerBlock)(
     ps,
     st::NamedTuple
 )
+
+
     x, c = x
 
     modulation, st_new = dit_block.adaLN_modulation(c, ps.adaLN_modulation, st.adaLN_modulation)
@@ -409,64 +408,55 @@ Based on https://github.com/LuxDL/Boltz.jl/blob/v0.3.9/src/vision/vit.jl#L48-L61
 The architecture is based on https://arxiv.org/abs/2212.09748
 """
 struct DiffusionTransformer <: Lux.AbstractExplicitContainerLayer{
-    (:t_embedding, :patchify_layer, :positional_embedding, :dit_blocks, :final_layer)#, :conv)
+    (:patchify_layer, :positional_embedding, :dit_blocks, :final_layer)#, :conv)
 }
-    t_embedding::Lux.Chain
     patchify_layer::Lux.Chain
     positional_embedding::Lux.AbstractExplicitLayer
     dit_blocks::Lux.AbstractExplicitLayer
     final_layer::Lux.AbstractExplicitLayer
     unpatchify::Function
-    # conv::Lux.Chain
     
 end
 
-function DiffusionTransformer(
-    imsize::Tuple{Int, Int};
+function DiffusionTransformer(;
+    image_size::Tuple{Int, Int},
     in_channels::Int=3, 
     out_channels=nothing,
     patch_size::Tuple{Int, Int}=(16, 16),
-    embed_dim::Int=768, 
+    embedding_dims::Int=768, 
     depth::Int=6, 
-    number_heads=16,
+    num_heads=16,
     mlp_ratio=4.0f0, 
     dropout_rate=0.1f0, 
     embedding_dropout_rate=0.1f0,
-    pars_dim=128
 )
 
     if isnothing(out_channels)
         out_channels = in_channels
     end
 
-    number_patches = prod(imsize .÷ patch_size)
-
-    t_embedding = Lux.Chain(
-        Lux.Dense(pars_dim => embed_dim),
-        NNlib.gelu,
-        Lux.Dense(embed_dim => embed_dim)
-    )
+    number_patches = prod(image_size .÷ patch_size)
 
     patchify_layer = patchify(
-        imsize; 
+        image_size; 
         in_channels=in_channels, 
         patch_size=patch_size, 
-        embed_planes=embed_dim
+        embed_planes=embedding_dims
     )
 
-    positional_embedding = ViPosEmbedding(embed_dim, number_patches)
+    positional_embedding = ViPosEmbedding(embedding_dims, number_patches)
 
     dit_blocks = Chain(
-        [DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio) for _ in 1:depth]...;
+        [DiffusionTransformerBlock(embedding_dims, num_heads, mlp_ratio) for _ in 1:depth]...;
     )
 
-    final_layer = FinalLayer(embed_dim, patch_size, out_channels) # (E, patch_size ** 2 * out_channels, N)
+    final_layer = FinalLayer(embedding_dims, patch_size, out_channels) # (E, patch_size ** 2 * out_channels, N)
 
-    h = div(imsize[1], patch_size[1])
-    w = div(imsize[2], patch_size[2])
+    h = div(image_size[1], patch_size[1])
+    w = div(image_size[2], patch_size[2])
     _unpatchify(x) = unpatchify(x, (h, w), patch_size, out_channels)
 
-    return DiffusionTransformer(t_embedding, patchify_layer, positional_embedding, dit_blocks, final_layer, _unpatchify)
+    return DiffusionTransformer(patchify_layer, positional_embedding, dit_blocks, final_layer, _unpatchify)
 end
 
 function (dt::DiffusionTransformer)(
@@ -477,17 +467,21 @@ function (dt::DiffusionTransformer)(
 
     x, t = input
 
-    t, st_new = dt.t_embedding(t, ps.t_embedding, st.t_embedding)
-    @set! st.t_embedding = st_new
-
     x, st_new = dt.patchify_layer(x, ps.patchify_layer, st.patchify_layer)
     @set! st.patchify_layer = st_new
 
     x, st_new = dt.positional_embedding(x, ps.positional_embedding, st.positional_embedding)
     @set! st.positional_embedding = st_new
 
-    x, st_new = dt.dit_blocks((x, t), ps.dit_blocks, st.dit_blocks)
-    @set! st.dit_blocks = st_new
+
+    for i in 1:length(dt.dit_blocks)
+        layer_name = Symbol(:layer_, i)
+
+        x, new_st = dt.dit_blocks[i](
+            (x, t), ps.dit_blocks[layer_name], st.dit_blocks[layer_name]
+        )
+        @set! st.dit_blocks[layer_name] = new_st
+    end
 
     x, st_new = dt.final_layer((x, t), ps.final_layer, st.final_layer)
     @set! st.final_layer = st_new
@@ -496,5 +490,8 @@ function (dt::DiffusionTransformer)(
 
     return x, st
 end
+
+
+
 
 

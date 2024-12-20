@@ -1,14 +1,14 @@
 
 # data_folder: "data/periodic_box_turbulence_data.jld2"
-data_folder: "data/periodic_box_turbulence_data_128.jld2"
+data_folder: "data/periodic_box_turbulence_data_64.jld2"
 
 state_variables:
   - velocity_x
   - velocity_y
 
 state_dimensions:
-  height: 128
-  width: 128
+  height: 64
+  width: 64
   channels: 2
 
 parameter_dimensions:
@@ -17,10 +17,10 @@ with_mask: false
 
 # Training and test IDs
 training_args:
-  ids: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] #, 16, 17, 18, 19, 20]
   time_step_info:
     start_time: 500
-    num_steps: 200
+    num_steps: 5
     skip_steps: 4
 
 test_args:

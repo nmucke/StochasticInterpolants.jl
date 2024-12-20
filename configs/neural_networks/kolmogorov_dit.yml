@@ -1,0 +1,42 @@
+
+training_args:
+  batch_size: 8
+  num_epochs: 1000
+  init_learning_rate: 1.0e-4
+  min_learning_rate: 1.0e-6
+  early_stop_patience: 10
+  num_test_paths: 5
+  num_test_sde_steps: 50
+  test_frequency: 20
+
+model_args:
+  model_type: "diffusion_transformer"
+  in_channels: 8
+  out_channels: 8
+  embedding_dims: 128
+  patch_size: 1
+  depth: 6
+  mlp_ratio: 4 
+  num_heads: 4
+  dropout_rate: 0.1 
+  embedding_dropout_rate: 0.1
+  len_history: 2
+  pars_dim: 0
+  channels: [8]
+  padding: "periodic"
+  projection: null
+
+optimizer_args:
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-8
+  betas: [0.9, 0.999]
+
+interpolant_args:
+  alpha: "linear"
+  beta: "quadratic"
+  gamma: "linear"
+  gamma_multiplier: 1.0e-1
+
+diffusion_args:
+  type: "linear" # "follmer_optimal"
+  multiplier: 1.0e-1

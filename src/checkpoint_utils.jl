@@ -129,8 +129,8 @@ end
 function CheckpointManager(
     test_problem::String,
     model_name::String;
-    neural_network_config::Dict = nothing,
-    data_config::Dict = nothing,
+    neural_network_config = nothing,
+    data_config = nothing,
     base_folder::String = "trained_models"
 )
     base_dir, figures_dir = create_checkpoint_directory(
@@ -188,7 +188,7 @@ function CheckpointManager(
     get_training_data = () -> load_train_tracking_data(base_dir)
     get_test_data = () -> load_test_tracking_data(base_dir)
 
-    load_model(model_name="model") = load_model_weights("$base_dir/$model_name.bson")
+    load_model(model_name="model") = load_model_weights("$base_dir")
 
     return (;
         base_dir,

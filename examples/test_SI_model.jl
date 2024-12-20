@@ -49,6 +49,7 @@ embedding_dims = 128; #256
 batch_size = 8;
 num_epochs = 1000;
 channels = [16, 32, 64, 128];
+
 projection = nothing #project_onto_divergence_free;
 if test_case == "transonic_cylinder_flow"
     attention_type = "linear"; # "linear" or "standard" or "DiT"
@@ -195,8 +196,8 @@ num_steps = 100;
 alpha = t -> 1f0 .- t; 
 dalpha_dt = t -> -1f0;
 
-beta = t -> t;
-dbeta_dt = t -> 1f0 #2f0 .* t;
+beta = t -> t.^2;
+dbeta_dt = t -> 2f0 .* t;
 
 
 
@@ -257,6 +258,7 @@ for i = 1:1
         x_0_energy = sum(x0[:, :, 1, 1].^2) + sum(x0[:, :, 2, 1].^2)
         # x_0_energy /= 2
         rhs = dalpha_dt(tt) .* alpha(tt) .* x_0_energy
+        
 
         x_1_energy = sum(x1[:, :, 1, 1].^2) + sum(x1[:, :, 2, 1].^2)
         # x_1_energy /= 2
@@ -266,9 +268,9 @@ for i = 1:1
         
         rhs += (dbeta_dt(tt) * alpha(tt) + dalpha_dt(tt) * beta(tt)) * x0_x1_prod
 
-        rhs += 0.5 * 128*128*2*gamma(tt).^2
+        rhs += 0.5 * 64*64*2*gamma(tt).^2
 
-        rhs += dgamma_dt(tt) * gamma(tt) * tt * 128*128*2
+        rhs += dgamma_dt(tt) * gamma(tt) * tt * 64*64*2
 
         e = e + rhs * dt
 

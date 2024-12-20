@@ -1,0 +1,44 @@
+
+# data_folder: "data/periodic_box_turbulence_data.jld2"
+data_folder: "data/periodic_box_turbulence_data_64.jld2"
+
+state_variables:
+  - velocity_x
+  - velocity_y
+
+state_dimensions:
+  height: 64
+  width: 64
+  channels: 2
+
+parameter_dimensions:
+
+with_mask: false
+
+# Training and test IDs
+training_args:
+  ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] #, 16, 17, 18, 19, 20]
+  time_step_info:
+    start_time: 500
+    num_steps: 200
+    skip_steps: 4
+
+test_args:
+  pars_low:
+    ids: [10]
+    time_step_info:
+      start_time: 540 # 900
+      num_steps: 50
+      skip_steps: 4
+
+normalize_data: false
+
+
+# Normalization parameters
+# velocity_x: mean = 0.444969, std = 0.206128
+# velocity_y: mean = 0.000299, std = 0.206128
+norm_mean: [1.766131330172005e-8, 1.422475315049354e-8]
+norm_std: [0.7129140811183516, 0.6955684386129051]
+
+pars_min: [0.0]
+pars_max: [1.0]

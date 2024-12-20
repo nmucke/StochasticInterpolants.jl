@@ -209,6 +209,61 @@ function get_forecasting_loss(
     return loss, st
 end
 
+
+
+"""
+    get_forecasting_from_gaussian_loss(
+        x_1::AbstractArray,
+        x_condition::AbstractArray,
+        pars::AbstractArray,
+        velocity::Lux.AbstractExplicitLayer,
+        interpolant::NamedTuple, 
+        ps::NamedTuple, 
+        st::NamedTuple,
+        rng::AbstractRNG,
+        dev=gpu_device()
+    )
+
+Computes the loss for the stochastic interpolant Model.
+"""
+function get_forecasting_from_gaussian_loss(
+    x_condition::AbstractArray,
+    x_1::AbstractArray,
+    pars::AbstractArray,
+    velocity::Lux.AbstractExplicitLayer,
+    interpolant::NamedTuple, 
+    ps::NamedTuple, 
+    st::NamedTuple,
+    rng::AbstractRNG,
+    dev=gpu_device()
+)
+    loss = 0.0
+    batch_size = size(x_1)[end]
+
+    x_0 = randn!(rng, similar(x_1, size(x_1)))
+    
+    t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+
+    z = randn!(rng, similar(x_1, size(x_1)))
+    z = sqrt.(t) .* z
+
+    g = interpolant.gamma(t) |> dev
+    dg_dt = interpolant.dgamma_dt(t) |> dev
+
+    I = interpolant.interpolant(x_0, x_1, t) .|> dev
+    dI_dt = interpolant.dinterpolant_dt(x_0, x_1, t) .|> dev
+
+    I = I .+ g .* z
+
+    R = dI_dt .+ dg_dt .* z
+
+    pred, st = velocity((I, x_condition, pars, t), ps, st)
+
+    loss = loss + mean((pred - R).^2)
+
+    return loss, st
+end
+
 """
     get_forecasting_loss(
         x_0::AbstractArray, 

@@ -142,6 +142,34 @@ function load_turbulence_in_periodic_box_data(;
 end
 
 
+function load_kolmogorov_data(;
+    data_folder,
+    data_ids,
+    state_dims,
+    num_pars,
+    time_step_info
+) 
+    start_time, num_steps, skip_steps = time_step_info
+
+    trainset_state = zeros(state_dims...,  num_steps, length(data_ids));
+    for (counter, i) = enumerate(data_ids)
+        state = load("$(data_folder)/sim_$(i).jld2", "u")
+
+        state = state[1:end-1, 1:end-1, :, :]
+
+        state = state[:, :, :, start_time:skip_steps:(start_time+skip_steps*num_steps-1)]
+
+        state = 0.5 .* (state[1:end-1, :, :, :] + state[2:end, :, :, :])
+        state = 0.5 .* (state[:, 1:end-1, :, :] + state[:, 2:end, :, :])
+
+        trainset_state[:, :, :, :, counter] = state
+    end
+    
+    trainset_pars = zeros(num_pars, num_steps, length(data_ids));
+
+    return trainset_state, trainset_pars
+end
+
 
 function prepare_data_for_time_stepping(
     trainset,
@@ -258,6 +286,24 @@ function load_test_case_data(
             num_pars=pars_dim,
             time_step_info=(test_start_time, test_num_steps, test_skip_steps)
         );
+    elseif test_case == "kolmogorov"
+        # Load the training data
+        trainset, trainset_pars = load_kolmogorov_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["training_args"]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(start_time, num_steps, skip_steps)
+        );
+
+        # Load the test data
+        testset, testset_pars = load_kolmogorov_data(
+            data_folder=data_folder,
+            data_ids=test_case_config["test_args"][test_args]["ids"],
+            state_dims=(H, W, C),
+            num_pars=pars_dim,
+            time_step_info=(test_start_time, test_num_steps, test_skip_steps)
+        );
     else
         error("Invalid test case")
     end
@@ -295,4 +341,45 @@ function load_test_case_data(
     end;
 
     return trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars
+end
+
+
+function prepare_latent_data(
+    model,
+    trainset,
+    dev
+)
+    (L_H, L_W, L_C) = model.autoencoder.latent_dimensions
+    (H, W, C, len_history) = size(trainset.init_distribution)[1:4]
+    batch_size = 8
+
+    latent_target_distribution = zeros(L_H, L_W, L_C, size(trainset.target_distribution)[end])
+    for i in 1:batch_size:size(trainset.target_distribution)[end]
+        bs = batch_size
+        if i + bs - 1 > size(trainset.target_distribution)[end]
+            bs = size(trainset.target_distribution)[end] - i + 1
+        end
+        x = trainset.target_distribution[:, :, :, i:i+bs-1] |> dev
+        (x, _) = model.autoencoder.encode(x)
+        latent_target_distribution[:, :, :, i:i+bs-1] = x |> LuxCPUDevice()
+    end
+
+    latent_init_distribution = zeros(L_H, L_W, L_C, len_history, size(trainset.init_distribution)[end])
+    for i in 1:batch_size:size(trainset.init_distribution)[end]
+        bs = batch_size
+        if i + bs - 1 > size(trainset.target_distribution)[end]
+            bs = size(trainset.target_distribution)[end] - i + 1
+        end
+        x = trainset.init_distribution[:, :, :, :, i:i+bs-1] |> dev
+        x = reshape(x, H, W, C, len_history*bs)
+        (x, _) = model.autoencoder.encode(x)
+        x = reshape(x, L_H, L_W, L_C, len_history, bs)
+        latent_init_distribution[:, :, :, :, i:i+bs-1] = x |> LuxCPUDevice()
+    end
+
+    return (;
+        target_distribution=latent_target_distribution,
+        init_distribution=latent_init_distribution,
+        pars_distribution=trainset.pars_distribution
+    )
 end

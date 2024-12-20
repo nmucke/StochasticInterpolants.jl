@@ -1,3 +1,31 @@
+function get_loss_function(;
+    type::String,
+    from_gaussian::Bool,
+    velocity,
+    interpolant
+)
+
+    if type == "forecasting"
+        if from_gaussian
+            return (x_condition, x_1, pars, ps, st, rng, dev) -> get_forecasting_from_gaussian_loss(
+                x_condition, x_1, pars, velocity, interpolant, ps, st, rng, dev
+            )
+        else
+            return (x_0, x_1, pars, ps, st, rng, dev) -> get_forecasting_loss(
+                x_0, x_1, pars, velocity, interpolant, ps, st, rng, dev
+            )
+        end
+
+    elseif type == "physics"
+        return get_physics_forecasting_loss
+    elseif type == "encoder"
+        return get_encoder_forecasting_loss
+    end
+end
+
+
+
+
 
 """
     FollmerStochasticInterpolant(
@@ -22,6 +50,8 @@ struct FollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
     drift_term
     diffusion_term
     projection
+    len_history
+    gaussian_base_distribution
 end
 
 """
@@ -39,18 +69,20 @@ function FollmerStochasticInterpolant(
     interpolant::NamedTuple,
     diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
     projection=nothing,
-    dev=gpu_device()
+    len_history=1,
+    dev=gpu_device(),
+    gaussian_base_distribution=false
 )
 
-    gamma(t) = interpolant.gamma(t)
-    dgamma_dt(t) = interpolant.dgamma_dt(t)
+    gamma(t) = interpolant.gamma(t) |> Float32
+    dgamma_dt(t) = interpolant.dgamma_dt(t) |> Float32
 
-    alpha(t) = interpolant.alpha(t)
-    dalpha_dt(t) = interpolant.dalpha_dt(t)
+    alpha(t) = interpolant.alpha(t) |> Float32
+    dalpha_dt(t) = interpolant.dalpha_dt(t) |> Float32
 
-    beta(t) = interpolant.beta(t)
-    dbeta_dt(t) = interpolant.dbeta_dt(t)
-
+    beta(t) = interpolant.beta(t) |> Float32
+    dbeta_dt(t) = interpolant.dbeta_dt(t) |> Float32
+    
     diffusion_term(t, x, x_0, pars, ps, st) = begin
         return diffusion_coefficient(t)
     end
@@ -72,15 +104,15 @@ function FollmerStochasticInterpolant(
         vel_t, st = velocity((x, x_0, pars, t), ps, st)
 
         if ode_mode
-            # return vel_t , st
-            return -2f0 .* x_0[:, :, :, end, :], st
+            return vel_t , st
+            # return -2f0 .* x_0[:, :, :, end, :], st
         end
 
-        # return vel_t, st
+        return vel_t, st
 
-        out = (1f0 .+ 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0[:, :, :, end, :])
+        # out = (1f0 .+ 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0[:, :, :, end, :])
 
-        return out, st
+        # return out, st
 
         # A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
         # A = 1 ./ A;
@@ -90,12 +122,15 @@ function FollmerStochasticInterpolant(
     end
 
     # Loss including the score network
-    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
-        x_0, x_1, pars, velocity, interpolant, ps, st, rng, dev
+    loss = get_loss_function(
+        type="forecasting",
+        from_gaussian=gaussian_base_distribution,
+        velocity=velocity,
+        interpolant=interpolant
     )
 
     return FollmerStochasticInterpolant(
-        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
+        velocity, score, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection, len_history, gaussian_base_distribution
     )
 end
 
@@ -124,6 +159,7 @@ struct LatentFollmerStochasticInterpolant <: Lux.AbstractExplicitContainerLayer{
     drift_term::Function
     diffusion_term::Function
     projection
+    len_history
 end
 
 """
@@ -143,7 +179,9 @@ function LatentFollmerStochasticInterpolant(
     interpolant::NamedTuple,
     diffusion_coefficient=DiffusionCoefficient(t -> sqrt.((3f0 .- t) .* (1f0 .- t))),
     projection=nothing,
-    dev=gpu_device()
+    len_history=1,
+    dev=gpu_device(),
+    gaussian_base_distribution=false
 )
 
     gamma(t) = interpolant.gamma(t)
@@ -182,30 +220,32 @@ function LatentFollmerStochasticInterpolant(
         vel_t, st = velocity((x, x_0, pars, t), ps, st)
 
         if ode_mode
-            # return vel_t , st
-            return -2f0 .* x_0, st
+            return vel_t , st
+            # return -2f0 .* x_0, st
         end
 
-        # return vel_t, st
+        return vel_t, st
 
-        out = (1f0 + 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0)
+        # out = (1f0 .+ 1f0./(2f0 .- t)) .* vel_t - 1f0./(t.*(2f0 .- t)) .* (2f0 .* x .- (2f0 .- t) .* x_0)
 
-        return out, st
+        # return out, st
 
-        A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
-        A = 1 ./ A;
-        c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
-        score = A .* (beta(t) .* vel_t .- c)
-        return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
+        # A = t .* gamma(t) .* (dbeta_dt(t) .* gamma(t) .- beta(t) .* dgamma_dt(t));
+        # A = 1 ./ A;
+        # c = dbeta_dt(t) .* x .+ (beta(t) .* dalpha_dt(t) - alpha(t) .* dbeta_dt(t)) .* x_0[:, :, :, end, :];
+        # score = A .* (beta(t) .* vel_t .- c)
+        # return vel_t .+ 0.5f0 .* (diffusion_coefficient(t).^2 .- gamma(t).^2) .* score, st
     end
 
-    # Loss including the score network
-    loss(x_0, x_1, pars, ps, st, rng, dev) = get_forecasting_loss(
-        x_0, x_1, pars, velocity, interpolant, ps, st, rng, dev
+    loss = get_loss_function(
+        type="forecasting",
+        from_gaussian=gaussian_base_distribution,
+        velocity=velocity,
+        interpolant=interpolant
     )
 
     return LatentFollmerStochasticInterpolant(
-        velocity, score, autoencoder, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection
+        velocity, score, autoencoder, interpolant, loss, gamma, diffusion_coefficient, drift_term, diffusion_term, projection, len_history
     )
 end
 

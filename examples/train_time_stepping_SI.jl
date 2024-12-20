@@ -30,7 +30,7 @@ dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "turbulence_in_periodic_box";
+test_case = "kolmogorov";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
@@ -50,7 +50,7 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 ##### Hyperparameters #####
 continue_training = false;
 model_base_dir = "trained_models/";
-model_name = "forecasting_model_new";
+model_name = "forecasting_model_optimal_interpolant";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -69,13 +69,11 @@ else
     )
 end;
 
-
 trainset = prepare_data_for_time_stepping(
     trainset,
     trainset_pars;
     len_history=config["model_args"]["len_history"]
 );
-
 
 ##### Forecasting SI model #####
 # Define the velocity model
@@ -84,13 +82,31 @@ velocity = get_SI_neural_network(;
     model_params=config["model_args"]
 );
 
+
 # Get Interpolant
-interpolant = get_interpolant(
-    config["interpolant_args"]["alpha"],
-    config["interpolant_args"]["beta"],
-    config["interpolant_args"]["gamma"],
-    T(config["interpolant_args"]["gamma_multiplier"]),
-);
+# interpolant = get_interpolant(
+#     config["interpolant_args"]["alpha"],
+#     config["interpolant_args"]["beta"],
+#     config["interpolant_args"]["gamma"],
+#     T(config["interpolant_args"]["gamma_multiplier"]),
+# );
+
+coefs = [
+    -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509;
+    -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879;
+    -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
+];
+# Cast to float32
+coefs = coefs .|> T;
+
+interpolant = Interpolant(
+    t -> get_alpha_series(t, coefs[1, :]), 
+    t -> get_beta_series(t, coefs[2, :]), 
+    t -> get_dalpha_series_dt(t, coefs[1, :]),
+    t -> get_dbeta_series_dt(t, coefs[2, :]), 
+    t -> get_gamma_series(t, coefs[3, :]),
+    t -> get_dgamma_series_dt(t, coefs[3, :])
+)
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(
@@ -108,8 +124,9 @@ end;
 model = FollmerStochasticInterpolant(
     velocity; 
     interpolant=interpolant, #Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
-    diffusion_coefficient=diffusion_coefficient,
+    diffusion_coefficient=t -> get_gamma_series(t, coefs[3, :]), #diffusion_coefficient,
     projection=projection,
+    len_history=config["model_args"]["len_history"],
     dev=dev
 );
 ##### Optimizer #####
@@ -179,20 +196,20 @@ GC.gc()
 
 
 # Create a gif
-# x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
-# x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
-# x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
-# x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
-# x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
-# x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
-# x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
-# x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
+x1, p1 = sqrt.(trainset[:, :, 1, :, 1].^2 + trainset[:, :, 2, :, 1].^2), trainset_pars[1, 1, 1];
+x2, p2 = sqrt.(trainset[:, :, 1, :, 2].^2 + trainset[:, :, 2, :, 2].^2), trainset_pars[1, 1, 2];
+x3, p3 = sqrt.(trainset[:, :, 1, :, 3].^2 + trainset[:, :, 2, :, 3].^2), trainset_pars[1, 1, 3];
+x4, p4 = sqrt.(trainset[:, :, 1, :, 4].^2 + trainset[:, :, 2, :, 4].^2), trainset_pars[1, 1, 4];
+x5, p5 = sqrt.(trainset[:, :, 1, :, 5].^2 + trainset[:, :, 2, :, 5].^2), trainset_pars[1, 1, 5];
+x6, p6 = sqrt.(trainset[:, :, 1, :, 6].^2 + trainset[:, :, 2, :, 6].^2), trainset_pars[1, 1, 6];
+x7, p7 = sqrt.(trainset[:, :, 1, :, 7].^2 + trainset[:, :, 2, :, 7].^2), trainset_pars[1, 1, 7];
+x8, p8 = sqrt.(trainset[:, :, 1, :, 8].^2 + trainset[:, :, 2, :, 8].^2), trainset_pars[1, 1, 8];
 
-# create_gif(
-#     (x1, x2, x3, x4, x5, x6, x7, x8), 
-#     "HF.gif", 
-#     ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
-# )
+create_gif(
+    (x1, x2, x3, x4, x5, x6, x7, x8), 
+    "HF.gif", 
+    ("Ma = $p1", "Ma = $p2", "Ma = $p3", "Ma = $p4", "Ma = $p5", "Ma = $p6", "Ma = $p7", "Ma = $p8")
+)
 
 
 

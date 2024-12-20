@@ -128,6 +128,21 @@ function compute_temporal_frequency(
 end
 
 
+function compute_norm(sol)
+
+    num_trajectories = size(sol, 5)
+    num_time_steps = size(sol, 4)
+
+    norm = zeros(num_time_steps, num_trajectories)
+    for i = 1:num_trajectories
+        for j in 1:num_time_steps
+            norm[j, i] = sqrt.(sum(sol[:, :, :, j, i].^2))
+        end
+    end
+
+    return norm
+end
+
 function compute_total_energy(sol)
 
     num_trajectories = size(sol, 5)
@@ -136,12 +151,27 @@ function compute_total_energy(sol)
     energy = zeros(num_time_steps, num_trajectories)
     for i = 1:num_trajectories
         for j in 1:num_time_steps
-            energy[j, i] = sum(sol[:, :, 1, j, i].^2) + sum(sol[:, :, 2, j, i].^2)
+            energy[j, i] = sum(sol[:, :, :, j, i].^2) # + sum(sol[:, :, 2, j, i].^2)
             energy[j, i] /= 2
         end
     end
 
     return energy
+end
+
+function compute_inner_product(x_0, x_1)
+
+    num_trajectories = size(x_0, 5)
+    num_time_steps = size(x_0, 4)
+
+    inner = zeros(num_time_steps, num_trajectories)
+    for i = 1:num_trajectories
+        for j in 1:num_time_steps
+            inner[j, i] = sum(x_0[:, :, :, j, i] .* x_1[:, :, :, j, i])
+        end
+    end
+
+    return inner
 end
 
 
@@ -227,10 +257,12 @@ function compare_sde_pred_with_true(
         x_true = testset
     end
 
-    if typeof(model) == PhysicsInformedStochasticInterpolant
-        len_history = model.model_velocity.len_history
+    len_history = model.len_history
+
+    if typeof(model) == LatentFollmerStochasticInterpolant
+        SDE_stepping = compute_multiple_latent_SDE_steps
     else
-        len_history = model.velocity.len_history
+        SDE_stepping = compute_multiple_SDE_steps
     end
     
     pathwise_MSE = 0
@@ -241,7 +273,7 @@ function compare_sde_pred_with_true(
         test_init_condition = testset[:, :, :, 1:len_history, i]
         test_pars = testset_pars[:, 1:1, i]
 
-        x = compute_multiple_SDE_steps(
+        x = SDE_stepping(
             init_condition=test_init_condition,
             parameters=test_pars,
             num_physical_steps=num_test_steps,
@@ -331,7 +363,7 @@ function compare_sde_pred_with_true(
     );
     create_gif(
         preds_to_save, 
-        figures_save_path * ".gif", 
+        figures_save_path * ".mp4", 
         ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"]
     )
 
