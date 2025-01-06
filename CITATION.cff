@@ -1,0 +1,24 @@
+cff-version: 0.1.0
+title: StochasticInterpolants.jl
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Nikolaj Takata
+    family-names: Mücke
+    affiliation: Centrum Wiskunde & Informatica
+    orcid: 'https://orcid.org/0000-0002-2635-9586'
+  - given-names: "Benjamin"
+    family-names: "Sanderse"
+    affiliation: Centrum Wiskunde & Informatica
+    orcid: "https://orcid.org/0000-0001-9483-1988"
+repository-code: 'https://github.com/nmucke/StochasticInterpolants.jl'
+url: 'https://github.com/nmucke/StochasticInterpolants.jl/'
+abstract: >-
+  Stochastic interpolants generative model
+  for stochastic forecasting of physics problems
+license: MIT
+commit: 7cfbbf24784288cd85e4dd6f0423f2cf709f5183
+version: 0.1.0
+date-released: '2025-01-06'
