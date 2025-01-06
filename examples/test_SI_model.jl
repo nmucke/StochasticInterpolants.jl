@@ -24,7 +24,7 @@ cpu_dev = LuxCPUDevice();
 
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "turbulence_in_periodic_box";
+test_case = "kolmogorov";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
@@ -43,104 +43,80 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
 
 ##### Hyperparameters #####
-len_history = 2; #2;
-embedding_dims = 128; #256
+continue_training = false;
+model_base_dir = "trained_models/";
+model_name = "forecasting_model_follmer_interpolant";
+model_name = "forecasting_model_optimal_interpolant";
 
-batch_size = 8;
-num_epochs = 1000;
-channels = [16, 32, 64, 128];
+checkpoint_manager = CheckpointManager(
+    test_case, model_name; base_folder=model_base_dir
+);
 
-projection = nothing #project_onto_divergence_free;
-if test_case == "transonic_cylinder_flow"
-    attention_type = "linear"; # "linear" or "standard" or "DiT"
-    use_attention_in_layer = [true, true, true, true]
-    attention_embedding_dims = 32;
-    padding = "constant";
-    num_heads = 4;
-elseif test_case == "turbulence_in_periodic_box"
-    # attention_type = "linear"; # "linear" or "standard" or "DiT"
-    # use_attention_in_layer = [true, true, true, true];
-    # attention_embedding_dims = 32
-    # padding = "periodic";
-    # num_heads = 4;
-    attention_type = "standard"; # "linear" or "standard" or "DiT"
-    use_attention_in_layer = [false, false, false, false];
-    attention_embedding_dims = 128
-    padding = "periodic";
-    num_heads = 4;
-    # attention_type = "DiT"; # "linear" or "standard" or "DiT"
-    # use_attention_in_layer = [false, false, false, false];
-    # attention_embedding_dims = 256
-    # padding = "periodic";
-    # num_heads = 8;
-end;
+config = checkpoint_manager.neural_network_config
 
 ##### Forecasting SI model #####
 # Define the velocity model
-# velocity = DitParsConvNextUNet(
-velocity = AttnParsConvNextUNet(
-    (H, W); 
-    in_channels=C, 
-    channels=channels, 
-    embedding_dims=embedding_dims, 
-    pars_dim=num_pars,
-    len_history=len_history,
-    attention_type=attention_type,
-    use_attention_in_layer=use_attention_in_layer,
-    padding=padding,
-    attention_embedding_dims=attention_embedding_dims,
-    num_heads=num_heads,
+velocity = get_SI_neural_network(;
+    image_size=(H, W),
+    model_params=config["model_args"]
 );
 
-
-for diffusion_multiplier = [0.01f0];
+for diffusion_multiplier = [0.1f0];
     num_generator_steps = 100
-    # Define interpolant and diffusion coefficients
-    # diffusion_multiplier = 0.5f0;
-    interpolant_multiplier = 0.5f0;
 
+    # Get Interpolant
+    interpolant = get_interpolant(
+        config["interpolant_args"]["alpha"],
+        config["interpolant_args"]["beta"],
+        config["interpolant_args"]["gamma"],
+        T(config["interpolant_args"]["gamma_multiplier"]),
+    );
 
-    # gamma = t -> interpolant_multiplier.* (1f0 .- t);
-    # dgamma_dt = t -> -1f0 .* interpolant_multiplier; #ones(size(t)) .* diffusion_multiplier;
-    # diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+    coefs = [
+        -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509;
+        -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879;
+        -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
+    ];
+    # Cast to float32
+    coefs = coefs .|> T;
 
-    # Define interpolant and diffusion coefficients
-    diffusion_multiplier = 0.01f0;
-    
-    gamma = t -> diffusion_multiplier.* (1f0 .- t);
-    dgamma_dt = t -> -1f0 .* diffusion_multiplier; #ones(size(t)) .* diffusion_multiplier;
-    diffusion_coefficient = t -> gamma(t); #diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
+    interpolant = Interpolant(
+        t -> get_alpha_series(t, coefs[1, :]), 
+        t -> get_beta_series(t, coefs[2, :]), 
+        t -> get_dalpha_series_dt(t, coefs[1, :]),
+        t -> get_dbeta_series_dt(t, coefs[2, :]), 
+        t -> get_gamma_series(t, coefs[3, :]),
+        t -> get_dgamma_series_dt(t, coefs[3, :])
+    )
 
-    alpha = t -> 1f0 .- t;
-    dalpha_dt = t -> -1f0;
+    # Get diffusion coefficient
+    diffusion_coefficient = get_diffusion_coefficient(
+        "follmer_optimal", #config["diffusion_args"]["type"],
+        T(config["diffusion_args"]["multiplier"]),
+    );
 
-    beta = t -> t.^2;
-    dbeta_dt = t -> 2f0 .* t;
-    # beta = t -> t;
-    # dbeta_dt = t -> 1f0; #2f0 .* t;
+    if config["model_args"]["projection"] == "divergence_free"
+        projection = project_onto_divergence_free;
+    else
+        projection = nothing;
+    end;
 
     # Initialise the SI model
     model = FollmerStochasticInterpolant(
         velocity; 
-        interpolant=Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
-        diffusion_coefficient=diffusion_coefficient,
+        # interpolant=interpolant, #Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
+        interpolant=interpolant,
+        diffusion_coefficient=diffusion_coefficient, #t -> get_gamma_series(t, coefs[3, :]), #diffusion_coefficient,
+        projection=projection,
+        len_history=config["model_args"]["len_history"],
         dev=dev
     );
+
     ps, st = Lux.setup(rng, model) .|> dev;
 
-    ##### Load checkpoint #####
-    if test_case == "transonic_cylinder_flow"
-        best_model = "checkpoint_epoch_10"
-        ps, st, opt_state = load_checkpoint("trained_models/transonic_cylinder_flow/$best_model.bson") .|> dev;
-    elseif test_case == "incompressible_flow"
-        best_model = "best_incompressible_model"
-        ps, st, opt_state = load_checkpoint("trained_models/forecasting_model/$best_model.bson") .|> dev;
-    elseif test_case == "turbulence_in_periodic_box"
-        # best_model = "checkpoint_epoch_60"
-        best_model = "best_model"
-        best_model = "checkpoint_epoch_850"
-        ps, st, opt_state = load_checkpoint("trained_models/turbulence_in_periodic_box/$best_model.bson") .|> dev;
-    end;
+    weights_and_states = checkpoint_manager.load_model();
+    ps = weights_and_states.ps |> dev;
+    st = weights_and_states.st |> dev;
 
     ##### Test stochastic interpolant #####
     st_ = Lux.testmode(st);
@@ -191,7 +167,7 @@ diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .-
 # gamma = t -> interpolant_multiplier .* sqrt.(2f0 .*t .* (1f0 .- t));
 # dgamma_dt = t -> -1f0 .* interpolant_multiplier; #ones(size(t)) .* diffusion_multiplier;
 # diffusion_coefficient = t -> diffusion_multiplier .* sqrt.((3f0 .- t) .* (1f0 .- t));
-num_steps = 100;
+num_steps = 200;
 
 alpha = t -> 1f0 .- t; 
 dalpha_dt = t -> -1f0;
@@ -268,11 +244,13 @@ for i = 1:1
         
         rhs += (dbeta_dt(tt) * alpha(tt) + dalpha_dt(tt) * beta(tt)) * x0_x1_prod
 
-        rhs += 0.5 * 64*64*2*gamma(tt).^2
+        rhs += 0.5 * 128*128*2*gamma(tt).^2
 
-        rhs += dgamma_dt(tt) * gamma(tt) * tt * 64*64*2
+        rhs += dgamma_dt(tt) * gamma(tt) * tt * 128*128*2
 
-        e = e + rhs * dt
+        lambda_term = x_0_energy - 0.5 * norm(test_I[:, :, :, t_i, 1])^2
+
+        e = e + rhs * dt + dt * gamma(tt) * lambda_term
 
         push!(pred, e)
     end

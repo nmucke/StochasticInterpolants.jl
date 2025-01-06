@@ -143,7 +143,10 @@ function compute_norm(sol)
     return norm
 end
 
-function compute_total_energy(sol)
+
+omega = 0.04908738521
+
+function compute_total_energy(sol, omega=[0.049f0, 0.049f0])
 
     num_trajectories = size(sol, 5)
     num_time_steps = size(sol, 4)
@@ -151,8 +154,9 @@ function compute_total_energy(sol)
     energy = zeros(num_time_steps, num_trajectories)
     for i = 1:num_trajectories
         for j in 1:num_time_steps
-            energy[j, i] = sum(sol[:, :, :, j, i].^2) # + sum(sol[:, :, 2, j, i].^2)
+            energy[j, i] = sum(sol[:, :, :, j, i].^2) * omega[1] * omega[2] # + sum(sol[:, :, 2, j, i].^2)
             energy[j, i] /= 2
+
         end
     end
 
@@ -183,13 +187,13 @@ function compute_energy_spectra(sol)
     nx = size(sol, 1);
     ny = size(sol, 2);
     
-    kx = fftfreq(nx, nx);
-    ky = fftfreq(ny, ny);
-    
-    K = (kx.^2)' .+ (ky.^2);
-    
+    kx = fftfreq(nx, nx)[1:Int(floor(nx/2))];
+    ky = fftfreq(ny, ny)[1:Int(floor(ny/2))];
+
+    K = sqrt.((kx.^2)' .+ (ky.^2));
+
     K_bins = logrange(1, maximum(K), 100);
-    
+
     a = 1.6;
     
     energy = zeros(Float32, length(K_bins), num_trajectories);
@@ -197,17 +201,20 @@ function compute_energy_spectra(sol)
         u = sol[:, :, 1, i];
         v = sol[:, :, 2, i];
 
-        u_fft = fft(u, [1, 2]);
-        v_fft = fft(v, [1, 2]);
+        u_fft = fft(u, [1, 2])[1:Int(floor(nx/2)), 1:Int(floor(ny/2))];
+        v_fft = fft(v, [1, 2])[1:Int(floor(nx/2)), 1:Int(floor(ny/2))];
 
         u_fft_squared = abs2.(u_fft) ./ (2 * prod(size(u_fft))^2);
         v_fft_squared = abs2.(v_fft) ./ (2 * prod(size(v_fft))^2);
+
+        u_fft_squared = u_fft_squared;
+        v_fft_squared = v_fft_squared;
         
         for j = 1:length(K_bins)
             
             bin = K_bins[j]
 
-            mask = (K .> bin / a) .& (K .< bin * a)
+            mask = (K .> bin / a) .& (K .< bin * a) .& (K .<= Int(floor(nx/2)))
     
             u_fft_filtered = u_fft_squared .* mask
             v_fft_filtered = v_fft_squared .* mask
@@ -314,7 +321,7 @@ function compare_sde_pred_with_true(
     energy_std = std(energy_pred, dims=2)
     energy_mean = mean(energy_pred, dims=2)
 
-    plot(abs.(energy_mean .- 2f0 .*energy_std), fillrange=energy_mean .+ 2f0 .*energy_std, color=:green, alpha=0.25, primary=false)
+    plot(abs.(energy_mean .- 1f0 .*energy_std), fillrange=energy_mean .+ 1f0 .*energy_std, color=:green, alpha=0.25, primary=false)
     plot!(energy_true, color=:blue, label="True", linewidth=3)
     plot!(energy_mean, color=:green, label="Stochastic Interpolant", linewidth=3)
     savefig(figures_save_path * "_energy.pdf")
@@ -325,7 +332,7 @@ function compare_sde_pred_with_true(
     energy_spectra_mean = mean(energy_spectra_pred, dims=2)
     energy_spectra_std = std(energy_spectra_pred, dims=2)
 
-    plot(K_bins, energy_spectra_mean .- 2f0 .* energy_spectra_std, fillrange=energy_spectra_mean .+ 2f0 .* energy_spectra_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
+    plot(K_bins, abs.(energy_spectra_mean .- 1f0 .* energy_spectra_std), fillrange=energy_spectra_mean .+ 1f0 .* energy_spectra_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
     plot!(K_bins, energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log)
     plot!(K_bins, energy_spectra_mean, color=:green, label="Stochastic Interpolant", linewidth=5, xaxis=:log, yaxis=:log)
     savefig(figures_save_path * "_energy_spectra.pdf")  
@@ -336,7 +343,7 @@ function compare_sde_pred_with_true(
     pred_fft_std = std(pred_fft .* pred_fft, dims=2)
 
     plot(true_freq, true_fft .* true_fft, color=:blue, label="True", linewidth=3, xaxis=:log2, yaxis=:log10)
-    plot!(pred_freq, abs.(pred_fft_mean .- 2f0 .*pred_fft_std), fillrange=pred_fft_mean .+ 2f0 .*pred_fft_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
+    plot!(pred_freq, abs.(pred_fft_mean .- 1f0 .*pred_fft_std), fillrange=pred_fft_mean .+ 1f0 .*pred_fft_std, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false)
     plot!(pred_freq, pred_fft_mean, color=:green, label="Stochastic Interpolant", linewidth=3, xaxis=:log2, yaxis=:log10)
     savefig(figures_save_path * "_frequency.pdf")
 

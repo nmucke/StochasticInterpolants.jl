@@ -3,10 +3,10 @@ training_args:
   early_stop_patience: 10
   num_test_paths: 5
   batch_size: 8
-  test_frequency: 10
-  num_test_sde_steps: 50
+  test_frequency: 20
+  num_test_sde_steps: 100
   min_learning_rate: 1.0e-6
-  num_epochs: 1000
+  num_epochs: 3000
 interpolant_args:
   gamma_multiplier: 0.1
   alpha: "linear"

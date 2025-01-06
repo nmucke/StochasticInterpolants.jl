@@ -2,12 +2,13 @@
 training_args:
   batch_size: 8
   num_epochs: 1000
-  init_learning_rate: 1.0e-4
+  max_learning_rate: 1.0e-4
   min_learning_rate: 1.0e-6
+  num_warmup_steps: 10
   early_stop_patience: 10
   num_test_paths: 5
   num_test_sde_steps: 50
-  test_frequency: 10
+  test_frequency: 20
 
 model_args:
   model_type: "conv_next_u_net"

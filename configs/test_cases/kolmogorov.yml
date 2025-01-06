@@ -29,7 +29,7 @@ test_args:
     ids: [46]
     time_step_info:
       start_time: 1000 # 900
-      num_steps: 50
+      num_steps: 250
       skip_steps: 2
 
 normalize_data: false

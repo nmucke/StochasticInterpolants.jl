@@ -14,6 +14,14 @@ using ProgressBars
 using OrderedCollections
 
 
+function get_value_or_default(dict, key, default)
+    if haskey(dict, key)
+        return dict[key]
+    else
+        return default
+    end
+end
+
 """
     train_stochastic_interpolant(
         model,
@@ -49,14 +57,15 @@ function train_stochastic_interpolant(;
 )
     cpu_dev = LuxCPUDevice();    
 
-    num_epochs = training_args["num_epochs"]
-    batch_size = training_args["batch_size"]
-    min_learning_rate = training_args["min_learning_rate"]
-    init_learning_rate = training_args["init_learning_rate"]
-    new_learning_rate = init_learning_rate
-    early_stop_patience = training_args["early_stop_patience"]
-    num_test_paths = training_args["num_test_paths"]
-    num_test_sde_steps = training_args["num_test_sde_steps"]
+    num_epochs = get_value_or_default(training_args, "num_epochs", 1000)
+    batch_size = get_value_or_default(training_args, "batch_size", 8)
+    min_learning_rate = get_value_or_default(training_args, "min_learning_rate", 1e-6)
+    new_learning_rate = min_learning_rate
+    max_learning_rate = get_value_or_default(training_args, "max_learning_rate", 1e-4)
+    early_stop_patience = get_value_or_default(training_args, "early_stop_patience", 10)
+    num_test_paths = get_value_or_default(training_args, "num_test_paths", 5)
+    num_test_sde_steps =  get_value_or_default(training_args, "num_test_sde_steps", 50)
+    num_warmup_steps =  get_value_or_default(training_args, "num_warmup_steps", 10)
 
     best_loss = 1e8
     early_stop_counter = 0
@@ -112,7 +121,11 @@ function train_stochastic_interpolant(;
         print("Loss Value after $epoch iterations: $running_loss \n")
         
         # Adjust learning rate
-        new_learning_rate = min_learning_rate .+ 0.5f0 .* (init_learning_rate - min_learning_rate) .* (1 .+ 1f0 .* cos.(epoch ./ num_epochs .* pi));
+        if epoch < num_warmup_steps
+            new_learning_rate = epoch * max_learning_rate / num_warmup_steps
+        else
+            new_learning_rate = min_learning_rate .+ 0.5f0 .* (max_learning_rate - min_learning_rate) .* (1 .+ 1f0 .* cos.((epoch-num_warmup_steps) ./ num_epochs .* pi));
+        end
         Optimisers.adjust!(opt_state, new_learning_rate)
 
         if epoch % training_args["test_frequency"] == 0

@@ -61,7 +61,7 @@ function get_main_model_with_pars(;
     elseif model_params["model_type"] == "diffusion_transformer"
         return DiffusionTransformer(;
             image_size=image_size,
-            in_channels=model_params["in_channels"], 
+            in_channels=model_params["channels"][1], 
             out_channels=model_params["out_channels"],
             patch_size=(model_params["patch_size"], model_params["patch_size"]),
             embedding_dims=model_params["embedding_dims"], 

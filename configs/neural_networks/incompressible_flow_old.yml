@@ -52,7 +52,6 @@ test_args:
 
 
 
-normalize_data: true
 # Normalization parameters
 # velocity_x: mean = 0.444969, std = 0.206128
 # velocity_y: mean = 0.000299, std = 0.206128

@@ -9,6 +9,7 @@ using NPZ
 using LuxCUDA
 using Optimisers
 using FileIO
+using CUDA
 
 using ForwardDiff
 
@@ -16,6 +17,7 @@ using Statistics
 using Plots
 
 test_case = "kolmogorov";
+# test_case = "incompressible_flow";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
@@ -65,6 +67,7 @@ else
         base_folder=model_base_dir
     )
 end;
+CUDA.allowscalar()
 
 trainset = prepare_data_for_time_stepping(
     trainset,
@@ -72,36 +75,37 @@ trainset = prepare_data_for_time_stepping(
     len_history=config["model_args"]["len_history"]
 );
 
-x_0 = trainset.init_distribution[:, :, :, end, :];
-x_1 = trainset.target_distribution;
+x_0 = trainset.init_distribution[:, :, :, end, :] .|> Float32;
+x_1 = trainset.target_distribution .|> Float32;
 
-interpolant(coefs) = begin
+num_samples = size(x_0)[end]
+
+interpolant(coefs, dev=gpu_device()) = begin
 
     num_total_coefs = length(coefs)
-    coefs = reshape(coefs, 3, num_total_coefs ÷ 3)
-    # coefs = reshape(coefs, 2, num_total_coefs ÷ 2)
+    coefs = reshape(coefs, 2, num_total_coefs ÷ 2)
 
-    alpha = t -> get_alpha_series(t, coefs[1, :])
-    beta = t -> get_beta_series(t, coefs[2, :])
-    gamma = t -> get_gamma_series(t, coefs[3, :])
+    alpha = t -> get_alpha_series(t, coefs[1, :] |> dev)
+    beta = t -> get_beta_series(t, coefs[2, :] |> dev)
+    # gamma = t -> get_gamma_series(t, coefs[3, :] |> dev)
 
-    dalpha_dt = t -> get_dalpha_series_dt(t, coefs[1, :])
-    dbeta_dt = t -> get_dbeta_series_dt(t, coefs[2, :])
-    dgamma_dt = t -> get_dgamma_series_dt(t, coefs[3, :])
+    dalpha_dt = t -> get_dalpha_series_dt(t, coefs[1, :] |> dev)
+    dbeta_dt = t -> get_dbeta_series_dt(t, coefs[2, :] |> dev)
+    # dgamma_dt = t -> get_dgamma_series_dt(t, coefs[3, :] |> dev)
 
-    # gamma = t -> 1f0 .- t
-    # dgamma_dt = t -> -1f0
+    gamma = t -> 0.1 .*(1f0 .- t)
+    dgamma_dt = t -> -0.1 .* 1f0
 
     return Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt) 
 end
 
-lambda = 1f0
-mu = 1f0
+lambda = 1f-8
+mu = 1f-12
 mu_max = 1e4
 beta = 2
 
-num_spochs = 50
-batch_size = 32
+num_spochs = 5
+batch_size = 256
 
 # i = 1
 # x_0_batch = x_0[:, :, :, i:i+batch_size-1];
@@ -124,79 +128,190 @@ batch_size = 32
 
 
 
-num_coefs = 8
-coefs = randn(num_coefs * 3)
+# i=10
+# t = rand!(rng, similar(x_1, 1, 1, 1, batch_size)) |> dev;
+# x_0_batch = x_0[:, :, :, i:i+batch_size-1] |> dev;
+# x_1_batch = x_1[:, :, :, i:i+batch_size-1] |> dev;
+# I_velocity = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x)).^2)
+# e = I_velocity(coefs)
 
-for epoch = 1:num_spochs
+# I_velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x)).^2)
+# v = I_velocity(coefs)
 
-    shuffled_ids = shuffle(rng, 1:size(x_0)[end])
-    x_0 = x_0[:, :, :, shuffled_ids]
-    x_1 = x_1[:, :, :, shuffled_ids]
+# e/v/1e3
 
-    running_loss = 0f0
-    for i in 1:batch_size:size(x_0)[end]
-        if i + batch_size - 1 > size(x_0)[end]
-            break
+# grad = ForwardDiff.gradient(I_velocity, coefs)
+# hessian = ForwardDiff.hessian(I_velocity, coefs)
+# hessian \ grad
+
+# coefs -= hessian \ grad
+
+if test_case == "kolmogorov"
+    omega = [0.04908f0, 0.04908f0]
+elseif test_case == "incompressible_flow"
+    omega = [0.03125f0, 0.03125f0]
+end
+
+num_coefs = 5
+best_coefs = randn(num_coefs * 2);
+best_coefs = best_coefs .|> Float32;
+best_coefs = best_coefs |> dev;
+
+best_energy = 1e8
+
+for num_coefs in [5, ]
+    for iter in [1, 2, 3, 4, 5]
+
+        lambda = 6.5f0
+
+        coefs = randn(num_coefs * 2);
+        coefs = coefs .|> Float32;
+        coefs = coefs |> dev;
+
+        for epoch = 1:num_spochs
+
+            shuffled_ids = shuffle(rng, 1:size(x_0)[end])
+            x_0 = x_0[:, :, :, shuffled_ids]
+            x_1 = x_1[:, :, :, shuffled_ids]
+
+            running_loss = 0f0
+            for i in 1:batch_size:size(x_0)[end]
+                if i + batch_size - 1 > size(x_0)[end]
+                    break
+                end
+
+                x_0_batch = x_0[:, :, :, i:i+batch_size-1] |> dev;
+                x_1_batch = x_1[:, :, :, i:i+batch_size-1] |> dev;
+                
+                t = rand!(rng, similar(x_0_batch, 1, 1, 1, batch_size)) |> dev;
+
+                # I_velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x)).^2)  
+                obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + lambda * sum(x.^2)
+                # obj = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + 10f0 * sum(x.^2)
+                # obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x)).^2) + 10f0 * sum(x.^2)
+                # grad = ForwardDiff.gradient(I_velocity, coefs)
+                # coefs -= lr .* grad
+
+                grad = ForwardDiff.gradient(obj, coefs)
+                hessian = ForwardDiff.hessian(obj, coefs)
+
+                hess_inv_grad = hessian \ grad
+
+                # Line search for step size
+                step_size = 1f0
+                coefs = coefs - step_size .* hess_inv_grad
+                new_coefs = coefs
+                old_loss = obj(coefs)
+                for j in 1:15
+                    new_coefs = coefs - step_size .* hess_inv_grad
+                    new_loss = obj(new_coefs)
+                    if new_loss < old_loss
+                        # print("j: $j, Loss: $new_loss, Step Size: $step_size, old loss: $old_loss")
+                        # print("\n")
+                        break
+                    end
+                    step_size /= 2
+                end
+
+                coefs = new_coefs
+
+                # lagrangian(coefs, t, lambda, mu) = begin
+                #     I_velocity = interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(coefs)).^2
+                #     I_energy = d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs))
+                #     I_energy = mean(I_energy)
+                #     return mean(I_velocity) .+ lambda .* I_energy .+ 0.5f0 .* mu .* I_energy.^2 + sum(coefs.^2)
+                # end
+
+                # # update coefs
+                # obj = coefs -> lagrangian(coefs, t, lambda, mu)
+                
+                # grad = ForwardDiff.gradient(obj, coefs)
+                # coefs -= grad
+                # # hessian = ForwardDiff.hessian(obj, coefs)
+
+                # # coefs -= 1e-10 .* hessian \ grad
+                # # # update lambda
+                # lambda = lambda + mu .* mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs)))
+
+                # # update mu
+                # mu = minimum([beta .* mu, mu_max])
+
+                # running_loss += obj(coefs)
+            end
+
+            # println("Epoch: $epoch, Loss: $(running_loss / batch_size)")
+        end
+        total_energy = 0f0
+        total_velocity = 0f0
+
+        t = rand!(rng, similar(x_0, 1, 1, 1, batch_size)) |> dev;
+
+        counter = 0
+        for i in 1:batch_size:size(x_0)[end]
+            if i + batch_size - 1 > size(x_0)[end]
+                break
+            end
+
+            x_0_batch = x_0[:, :, :, i:i+batch_size-1] |> dev;
+            x_1_batch = x_1[:, :, :, i:i+batch_size-1] |> dev;
+
+            energ = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x), omega).^2)
+            velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2)
+
+            total_energy += energ(coefs)
+            total_velocity += velocity(coefs)
+
+            counter += 1
         end
 
-        x_0_batch = x_0[:, :, :, i:i+batch_size-1]
-        x_1_batch = x_1[:, :, :, i:i+batch_size-1]
-        
-        t = rand!(rng, similar(x_1, 1, 1, 1, batch_size))
+        if total_energy < best_energy
+            best_energy = total_energy
+            best_coefs = coefs
+        end
 
-        I_velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x)).^2)              
-        grad = ForwardDiff.gradient(I_velocity, coefs)
-        coefs -= 0.01 .* grad
-
-
-        # lagrangian(coefs, t, lambda, mu) = begin
-        #     I_velocity = interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(coefs)).^2
-        #     I_energy = d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs))
-        #     I_energy = mean(I_energy)
-        #     return mean(I_velocity) .+ lambda .* I_energy .+ 0.5f0 .* mu .* I_energy.^2 # 
-        # end
-
-        # # update coefs
-        # obj = coefs -> lagrangian(coefs, t, lambda, mu)
-        # # obj = coefs -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs)).^2)
-        # # lol = obj(coefs)
-        # # print(coefs)
-        # # print("\n")
-        
-        # grad = ForwardDiff.gradient(obj, coefs)
-        # coefs -= 1e-12 .* grad
-        # # hessian = ForwardDiff.hessian(obj, coefs)
-
-        # # coefs -= 1e-10 .* hessian \ grad
-        # # # update lambda
-        # lambda = lambda + 1e-12 .* mu .* mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs)))
-
-        # # update mu
-        # mu = minimum([beta .* mu, mu_max])
-
-        running_loss += I_velocity(coefs)
+        println("Num coefs: $num_coefs, Lambda: $lambda, Energy: $(total_energy / counter), Velocity: $(total_velocity / counter)")
     end
-
-    println("Epoch: $epoch, Loss: $(running_loss / batch_size)")
 end
+
+
+
 # -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509
 # -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879
 # -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
 
-x0 = testset[:, :, :, 1:1, 1]
-x1 = testset[:, :, :, 2:2, 1]
+coefs = reshape(best_coefs, 2, 5)
 
-x0_energy = 0.5*sum(x0.^2, dims=(1, 2, 3))
+coefs = [
+    -1.22202  -0.0658369  -0.0373067  -0.0114895   -0.0213044;
+    -1.22062  -0.0615028  -0.0364064  -0.00311659   0.00803215
+]
+
+# 0.1 * gamma
+coefs = [
+    -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+    -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+]
+coefs = coefs |> cpu_dev;
+
+x0 = testset[:, :, :, 100:100, 1]
+x1 = testset[:, :, :, 101:101, 1]
+
+x0_energy = 0.5*sum(x0.^2, dims=(1, 2, 3)) * omega[1] * omega[2]
 
 num_steps = 1000
 t_vec = LinRange(0f0, 1f0, num_steps)
 dt = 1f0 / num_steps
 
+alpha = t -> get_alpha_series(t, coefs[1, :])
+beta = t -> get_beta_series(t, coefs[2, :])
+plot(t_vec, alpha.(t_vec), label="Alpha", xlabel="Time", ylabel="Alpha", title="Alpha")
+plot!(t_vec, beta.(t_vec), label="Beta", xlabel="Time", ylabel="Beta", title="Beta")
+
 energy_pred_list = zeros(num_steps)
 energy_true = []
 for (i, t) in enumerate(t_vec)
     energy_t = x0_energy .+ dt .* d_interpolant_energy_dt(
-        x0, x1, t, interpolant(coefs)
+        x0, x1, t, interpolant(coefs, cpu_dev), omega, cpu_dev
     )
     energy_pred_list[i] = energy_t[1, 1, 1, 1]
     x0_energy = energy_t
@@ -210,7 +325,7 @@ noise = repeat(noise, outer = [1, 1, 1, num_steps]);
 test_I = interpolant(coefs).interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* interpolant(coefs).gamma(t_all);
 test_I = reshape(test_I, size(test_I)[1:4]..., 1);
 
-energy_true = compute_total_energy(test_I);
+energy_true = compute_total_energy(test_I, omega);
 
 inter = get_interpolant(
     config["interpolant_args"]["alpha"],
@@ -219,11 +334,10 @@ inter = get_interpolant(
     config["interpolant_args"]["gamma_multiplier"],
 );
 
-lol_coefs = randn(num_coefs * 3)
 test_I = inter.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
 test_I = reshape(test_I, size(test_I)[1:4]..., 1);
 
-energy_true_lol = compute_total_energy(test_I);
+energy_true_lol = compute_total_energy(test_I, omega);
 
 using Plots
 plot(t_vec, energy_pred_list, label="Predicted Energy", xlabel="Time", ylabel="Energy", title="Energy of the System")

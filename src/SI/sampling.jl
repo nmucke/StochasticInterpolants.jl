@@ -441,7 +441,7 @@ function forecasting_sde_sampler(
         diffusion_term,
         x,
         pars,
-        timesteps[2:end],
+        timesteps[2:end-1],
         ps,
         st,
         rng,
@@ -449,19 +449,19 @@ function forecasting_sde_sampler(
     )
 
     # Final step
-    # z = randn(rng, size(x_0)) |> dev
-    # z = randn!(rng, similar(x, size(x)))
+    z = randn(rng, size(x_0)) |> dev
+    z = randn!(rng, similar(x, size(x)))
 
-    # dt = Float32.(timesteps[end] - timesteps[end-1])
-    # dW = sqrt(dt) .* z
+    dt = Float32.(timesteps[end] - timesteps[end-1])
+    dW = sqrt(dt) .* z
     
-    # t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
-    # # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true); #, phys_vel=phys_vel_t)
-    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=false);
+    t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
+    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true); #, phys_vel=phys_vel_t)
+    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=false);
 
-    # t = repeat(t, size(x)[1:3]...)
-    # # x = x + vel_t .* dt .+ model.gamma(t) .* dw  
-    # x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
+    t = repeat(t, size(x)[1:3]...)
+    # x = x + vel_t .* dt .+ model.gamma(t) .* dw  
+    x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
 
     if !isnothing(model.projection)
         x = model.projection(x, dev)

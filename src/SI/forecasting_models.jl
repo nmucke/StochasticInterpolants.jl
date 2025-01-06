@@ -74,14 +74,14 @@ function FollmerStochasticInterpolant(
     gaussian_base_distribution=false
 )
 
-    gamma(t) = interpolant.gamma(t) |> Float32
-    dgamma_dt(t) = interpolant.dgamma_dt(t) |> Float32
+    gamma(t) = interpolant.gamma(t) #  |> Float32
+    dgamma_dt(t) = interpolant.dgamma_dt(t) # |> Float32
 
-    alpha(t) = interpolant.alpha(t) |> Float32
-    dalpha_dt(t) = interpolant.dalpha_dt(t) |> Float32
+    alpha(t) = interpolant.alpha(t)  # |> Float32
+    dalpha_dt(t) = interpolant.dalpha_dt(t) # |> Float32
 
-    beta(t) = interpolant.beta(t) |> Float32
-    dbeta_dt(t) = interpolant.dbeta_dt(t) |> Float32
+    beta(t) = interpolant.beta(t) # |> Float32
+    dbeta_dt(t) = interpolant.dbeta_dt(t) # |> Float32
     
     diffusion_term(t, x, x_0, pars, ps, st) = begin
         return diffusion_coefficient(t)

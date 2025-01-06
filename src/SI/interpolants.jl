@@ -82,7 +82,7 @@ function get_alpha_series(t, coefs)
 
     num_terms = length(coefs)
     sin_evals = [sin.(i .* pif0 .* t) for i in 1:num_terms]
-    alpha_series = cos.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .*  sum(coefs .* sin_evals)
+    alpha_series = cos.(0.5f0 .* pif0 .* t) .+ 1f0 ./ num_terms .*  coefs'sin_evals
     
     return alpha_series
 end
@@ -91,7 +91,7 @@ function get_dalpha_series_dt(t, coefs)
 
     num_terms = length(coefs)
     dsin_dt_evals = [i .* pif0 * cos.(i .* pif0 .* t) for i in 1:num_terms]
-    dalpha_series_dt = -0.5f0 .* pif0 .* sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* sum(coefs .* dsin_dt_evals)
+    dalpha_series_dt = -0.5f0 .* pif0 .* sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* coefs'dsin_dt_evals
     
     return dalpha_series_dt
 end
@@ -102,7 +102,7 @@ function get_beta_series(t, coefs)
 
     sin_evals = [sin.(i .* pif0 .* t) for i in 1:num_terms]
 
-    beta_series = sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .*  sum(coefs .* sin_evals)
+    beta_series = sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .*   coefs'sin_evals
     
     return beta_series
 end
@@ -111,7 +111,7 @@ function get_dbeta_series_dt(t, coefs)
     
     num_terms = length(coefs)
     dsin_dt_evals = [i .* pif0 * cos.(i .* pif0 .* t) for i in 1:num_terms]
-    dbeta_series_dt = 0.5f0 .* pif0 .* cos.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* sum(coefs .* dsin_dt_evals)
+    dbeta_series_dt = 0.5f0 .* pif0 .* cos.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* coefs'dsin_dt_evals
     
     return dbeta_series_dt
 end
@@ -120,7 +120,7 @@ function get_gamma_series(t, coefs)
 
     num_terms = length(coefs)
     sin_evals = [sin.(i .* pif0 .* t) for i in 1:num_terms]
-    gamma_series = cos.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .*  sum(coefs .* sin_evals)
+    gamma_series = cos.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .*  coefs'sin_evals
     
     return gamma_series
 end
@@ -129,7 +129,7 @@ function get_dgamma_series_dt(t, coefs)
 
     num_terms = length(coefs)
     dsin_dt_evals = [i .* pif0 * cos.(i .* pif0 .* t) for i in 1:num_terms]
-    dgamma_series_dt = -0.5f0 .* pif0 .* sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* sum(coefs .* dsin_dt_evals)
+    dgamma_series_dt = -0.5f0 .* pif0 .* sin.(0.5f0 .* pif0 .* t) + 1f0 ./ num_terms .* coefs'dsin_dt_evals
     
     return dgamma_series_dt
 end
@@ -139,36 +139,36 @@ function d_interpolant_energy_dt(
     x_0,
     x_1,
     t,
-    interpolant
+    interpolant,
+    omega=(0.04908f0, 0.04908f0),
+    dev=gpu_device()
 )
 
     H, W, C = size(x_0)[1], size(x_0)[2], size(x_0)[3]
     N = H * W * C
 
-    # alpha = t -> get_alpha_series(t, coefs[1, :])
-    # beta = t -> get_beta_series(t, coefs[2, :])
-    # gamma = t -> get_gamma_series(t, coefs[3, :])
+    alpha = interpolant.alpha(t) |> dev
+    beta = interpolant.beta(t) |> dev
+    gamma = interpolant.gamma(t) |> dev
 
-    # dalpha_dt = t -> get_dalpha_series_dt(t, coefs[1, :])
-    # dbeta_dt = t -> get_dbeta_series_dt(t, coefs[2, :])
-    # dgamma_dt = t -> get_dgamma_series_dt(t, coefs[3, :])
+    dalpha_dt = interpolant.dalpha_dt(t) |> dev
+    dbeta_dt = interpolant.dbeta_dt(t) |> dev
+    dgamma_dt = interpolant.dgamma_dt(t) |> dev
 
-    alpha, dalpha_dt = interpolant.alpha, interpolant.dalpha_dt
-    beta, dbeta_dt = interpolant.beta, interpolant.dbeta_dt
-    gamma, dgamma_dt = interpolant.gamma, interpolant.dgamma_dt
 
-    x_0_norm = sum(x_0.^2, dims=(1, 2, 3))
-    x_1_norm = sum(x_1.^2, dims=(1, 2, 3))
-    inner_product = sum(x_0 .* x_1, dims=(1, 2, 3))
+    x_0_norm = sum(x_0.^2, dims=(1, 2, 3)) * omega[1] * omega[2]
+    x_1_norm = sum(x_1.^2, dims=(1, 2, 3)) * omega[1] * omega[2]
+    inner_product = sum(x_0 .* x_1, dims=(1, 2, 3)) * omega[1] * omega[2]
 
-    x_0_norm_term = dalpha_dt(t) .* alpha(t) .* x_0_norm
-    x_1_norm_term = dbeta_dt(t) .* beta(t) .* x_1_norm
 
-    mix_term = (dbeta_dt(t) .* alpha(t) .+ beta(t) .* dalpha_dt(t)) .* inner_product
+    x_0_norm_term = dalpha_dt .* alpha .* x_0_norm
+    x_1_norm_term = dbeta_dt .* beta .* x_1_norm
 
-    w_norm_term = dgamma_dt(t) .* gamma(t) .* t .* N
+    mix_term = (dbeta_dt .* alpha .+ beta .* dalpha_dt) .* inner_product
 
-    gamma_squared_term = 0.5f0 .* gamma(t).^2 .* N
+    w_norm_term = dgamma_dt .* gamma .* t .* N  * omega[1] * omega[2]
+
+    gamma_squared_term = 0.5f0 .* gamma.^2 .* N  * omega[1] * omega[2]
 
     return x_0_norm_term .+ x_1_norm_term .+ mix_term .+ w_norm_term .+ gamma_squared_term
 end
@@ -177,13 +177,18 @@ function interpolant_velocity(
     x_0,
     x_1,
     t,
-    interpolant
+    interpolant,
+    omega=(0.04908f0, 0.04908f0),
+    dev=gpu_device()
 )
-    z = randn!(similar(x_1, size(x_1)))
-    W = sqrt.(t) .* z
+    # z = randn!(similar(x_1, size(x_1)))
+    # W = sqrt.(t) .* z
     # W = map(t -> sqrt.(t) .* z, t)
 
-    return interpolant.dalpha_dt(t) .* x_0 .+ interpolant.dbeta_dt(t) .* x_1 .+ interpolant.dgamma_dt(t) .* W
+    dalpha_dt = interpolant.dalpha_dt(t) |> dev
+    dbeta_dt = interpolant.dbeta_dt(t) |> dev
+
+    return dalpha_dt .* x_0 .+ dbeta_dt .* x_1 #.+ interpolant.dgamma_dt(t) .* W
 
     # velocity = map((t, w) -> dalpha_dt(t) .* x_0 .+ dbeta_dt(t) .* x_1 .+ dgamma_dt(t) .* w, t, W)
     # velocity = map((t, w) -> dalpha_dt(t) .* x_0 .+ dbeta_dt(t) .* x_1, t, W)

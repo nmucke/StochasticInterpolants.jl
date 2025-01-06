@@ -1,12 +1,13 @@
 training_args:
-  init_learning_rate: 0.0001
   early_stop_patience: 10
+  num_warmup_steps: 10
   num_test_paths: 5
   batch_size: 8
-  test_frequency: 5
-  num_test_sde_steps: 50
+  test_frequency: 20
+  num_test_sde_steps: 100
   min_learning_rate: 1.0e-6
   num_epochs: 1000
+  max_learning_rate: 0.0001
 interpolant_args:
   gamma_multiplier: 0.1
   alpha: "linear"
@@ -16,15 +17,15 @@ model_args:
   mlp_ratio: 4
   dropout_rate: 0.1
   channels:
-    - 8
+    - 16
   depth: 6
-  in_channels: 8
+  in_channels: 2
   padding: "periodic"
-  out_channels: 8
+  out_channels: 2
   embedding_dropout_rate: 0.1
   len_history: 2
-  embedding_dims: 128
-  patch_size: 1
+  embedding_dims: 512
+  patch_size: 8
   pars_dim: 0
   num_heads: 4
   projection: ~

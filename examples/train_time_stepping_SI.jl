@@ -50,15 +50,16 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 ##### Hyperparameters #####
 continue_training = false;
 model_base_dir = "trained_models/";
-model_name = "forecasting_model_optimal_interpolant";
+model_name = "forecasting_model_optimized_large";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
         test_case, model_name; base_folder=model_base_dir
     )
 
-    config = checkpoint_manager.neural_network_config("trained_models/$test_case/$model_name")
+    config = checkpoint_manager.neural_network_config
 else
+    # config = YAML.load_file("configs/neural_networks/$(test_case)_dit.yml");
     config = YAML.load_file("configs/neural_networks/$test_case.yml")
     
     checkpoint_manager = CheckpointManager(
@@ -84,19 +85,25 @@ velocity = get_SI_neural_network(;
 
 
 # Get Interpolant
-# interpolant = get_interpolant(
-#     config["interpolant_args"]["alpha"],
-#     config["interpolant_args"]["beta"],
-#     config["interpolant_args"]["gamma"],
-#     T(config["interpolant_args"]["gamma_multiplier"]),
-# );
+interpolant = get_interpolant(
+    config["interpolant_args"]["alpha"],
+    config["interpolant_args"]["beta"],
+    config["interpolant_args"]["gamma"],
+    T(config["interpolant_args"]["gamma_multiplier"]),
+);
+
+# coefs = [
+#     -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509;
+#     -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879;
+#     -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
+# ];
+# # Cast to float32
+# coefs = coefs .|> T;
 
 coefs = [
-    -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509;
-    -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879;
-    -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
-];
-# Cast to float32
+    -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+    -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+]
 coefs = coefs .|> T;
 
 interpolant = Interpolant(
@@ -104,8 +111,8 @@ interpolant = Interpolant(
     t -> get_beta_series(t, coefs[2, :]), 
     t -> get_dalpha_series_dt(t, coefs[1, :]),
     t -> get_dbeta_series_dt(t, coefs[2, :]), 
-    t -> get_gamma_series(t, coefs[3, :]),
-    t -> get_dgamma_series_dt(t, coefs[3, :])
+    t -> 0.1f0 .* (1f0 .- t),
+    t -> -1f0 .* 0.1f0
 )
 
 # Get diffusion coefficient
@@ -123,8 +130,9 @@ end;
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
     velocity; 
-    interpolant=interpolant, #Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
-    diffusion_coefficient=t -> get_gamma_series(t, coefs[3, :]), #diffusion_coefficient,
+    # interpolant=interpolant, #Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt),
+    interpolant=interpolant,
+    diffusion_coefficient=diffusion_coefficient, #t -> get_gamma_series(t, coefs[3, :]), #diffusion_coefficient,
     projection=projection,
     len_history=config["model_args"]["len_history"],
     dev=dev
@@ -139,7 +147,9 @@ opt = Optimisers.AdamW(
 ##### Load model #####
 if continue_training
     weights_and_states = checkpoint_manager.load_model();
-    ps, st, opt_state = weights_and_states .|> dev;
+    ps = weights_and_states.ps |> dev;
+    st = weights_and_states.st |> dev;
+    opt_state = Optimisers.setup(opt, ps);
 else
     ps, st = Lux.setup(rng, model) .|> dev;
     opt_state = Optimisers.setup(opt, ps);
