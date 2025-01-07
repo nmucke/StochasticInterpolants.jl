@@ -102,13 +102,14 @@ In this example 'alpha', 'beta', and 'gamma' are defined as follows:
 \begin{equation}
     \alpha(t) = 1 - t, \quad \beta(t) = t^2, \quad \gamma(t) = 0.1 * (1 - t).
 \end{equation}
+```
 With this formulation, the resulting SDE is of the form:
 ```math
 \begin{equation}
     dX_t = \left[b(X_t, X_0, t) + (g^2(t) - \gamma^2(t)) \right] dt + g(t)dW_t,
 \end{equation}
 ```
-where `g` is the diffusion coeffcient and can be chosen (almost) freely. 
+where `g` is the diffusion coeffcient and can be chosen (almost) freely. `b` is the velocity which we will estimate using a neural network.
 
 ```julia
 # Get Interpolant
@@ -133,7 +134,7 @@ else
 end;
 ```
 
-
+The `FollmerStochasticInterpolant` struct contains all the relevant parts of the stochastic interpolant model including the velocity neural network, the interpolant, and the diffusion coefficient. 
 ```julia
 # Setup the SI model
 model = FollmerStochasticInterpolant(
@@ -158,6 +159,8 @@ opt = Optimisers.AdamW(
 # Initialise the optimiser
 opt_state = Optimisers.setup(opt, ps);
 ```
+
+The training loop is set up using the `train_stochastic_interpolant` function. During the training the model is tested against the test data. 
 
 ```julia
 # Train the model
