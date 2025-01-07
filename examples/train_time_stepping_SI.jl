@@ -48,7 +48,7 @@ num_steps = size(trainset, 4);
 H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
 ##### Hyperparameters #####
-continue_training = false;
+continue_training = true;
 model_base_dir = "trained_models/";
 model_name = "forecasting_model_not_optimized";
 
