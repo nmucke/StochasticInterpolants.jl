@@ -108,7 +108,7 @@ With this formulation, the resulting SDE is of the form:
     dX_t = \left[b(X_t, X_0, t) + (g^2(t) - \gamma^2(t)) \right] dt + g(t)dW_t,
 \end{equation}
 ```
-where `g` can be chosen (almost) freely. 
+where `g` is the diffusion coeffcient and can be chosen (almost) freely. 
 
 ```julia
 # Get Interpolant
