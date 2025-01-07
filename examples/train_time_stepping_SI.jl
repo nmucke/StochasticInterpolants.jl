@@ -50,7 +50,7 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 ##### Hyperparameters #####
 continue_training = false;
 model_base_dir = "trained_models/";
-model_name = "forecasting_model_optimized_large";
+model_name = "forecasting_model_not_optimized";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -70,7 +70,7 @@ else
     )
 end;
 
-trainset = prepare_data_for_time_stepping(
+trainset = prepare_data_for_time_stepping(  
     trainset,
     trainset_pars;
     len_history=config["model_args"]["len_history"]
@@ -100,20 +100,20 @@ interpolant = get_interpolant(
 # # Cast to float32
 # coefs = coefs .|> T;
 
-coefs = [
-    -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-    -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-]
-coefs = coefs .|> T;
+# coefs = [
+#     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+#     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+# ]
+# coefs = coefs .|> T;
 
-interpolant = Interpolant(
-    t -> get_alpha_series(t, coefs[1, :]), 
-    t -> get_beta_series(t, coefs[2, :]), 
-    t -> get_dalpha_series_dt(t, coefs[1, :]),
-    t -> get_dbeta_series_dt(t, coefs[2, :]), 
-    t -> 0.1f0 .* (1f0 .- t),
-    t -> -1f0 .* 0.1f0
-)
+# interpolant = Interpolant(
+#     t -> get_alpha_series(t, coefs[1, :]), 
+#     t -> get_beta_series(t, coefs[2, :]), 
+#     t -> get_dalpha_series_dt(t, coefs[1, :]),
+#     t -> get_dbeta_series_dt(t, coefs[2, :]), 
+#     t -> 0.1f0 .* (1f0 .- t),
+#     t -> -1f0 .* 0.1f0
+# )
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(

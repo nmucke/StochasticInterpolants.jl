@@ -1,3 +1,7 @@
 # StochasticInterpolants
 
-[![Build Status](https://github.com/nmucke/StochasticInterpolants.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/nmucke/StochasticInterpolants.jl/actions/workflows/CI.yml?query=branch%3Amain)
+## Demo
+
+```julia
+x = 2
+```

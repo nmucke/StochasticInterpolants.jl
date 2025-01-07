@@ -15,7 +15,7 @@ model_args:
   in_channels: 2
   out_channels: 2
   embedding_dims: 128
-  channels: [16, 32, 64, 128]
+  channels: [8, 16, 32, 64]
   attention_type: "DiT" # "linear" or "standard" or "DiT"
   use_attention_in_layer: [false, false, false, false] # [true, true, true, true];
   attention_embedding_dims: 64
