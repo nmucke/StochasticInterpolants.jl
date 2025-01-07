@@ -4,6 +4,13 @@ CurrentModule = StochasticInterpolants
 
 # Example
 
+In this example a stochastic interpolant is trained to forecast Kolmogorov flow using the stochastic interpolant.
+
+The example requires the following:
++ The data for the test case.
++ The model configuration file.
++ The data configuration file.
+
 
 ```julia
 # Load relevant packages
@@ -44,6 +51,8 @@ num_steps = size(trainset, 4); # Number of training steps
 H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3); # Dimensions of the data
 ```
 
+The model configuration file is loaded and the checkpoint manager is set up. The checkpoint manager handles saving and loading of models and the training progress. 
+
 ```julia
 # Setup checkpoint manager that handles saving and loading of models
 # and the training progress
@@ -60,9 +69,10 @@ checkpoint_manager = CheckpointManager(
 );
 ```
 
+The data is prepared for time stepping according to the model configuration. Specifically, the data is reshaped to have an initial distribution and target distribution. The initial distribution is the data at time `t-len_history` to `t` and the target distribution is the data at time `t+1`. 
 
 ```julia
-# Prepare the data for time stepping
+# Prepare the data for time stepping according to model configuration
 # This function takes the training data and the training parameters
 # and returns the data in the format required for time stepping
 trainset = prepare_data_for_time_stepping(  
@@ -72,6 +82,7 @@ trainset = prepare_data_for_time_stepping(
 );
 ```
 
+The velocity model is neural network. The architecture can be anything that suits the data dimensions. In general, the architecture is similar to architectures used in denosing diffusion models. In this project, the architecture is a UNet with ConvNext layers and diffusion transformer in the bottleneck. The hyperparameters are set in config file.  
 ```julia
 # Define the velocity model
 velocity = get_SI_neural_network(;
@@ -79,6 +90,25 @@ velocity = get_SI_neural_network(;
     model_params=config["model_args"]
 );
 ```
+
+The interpolant and diffusion coefficient are set according to the config file. The interpolant is a stochastic interpolant with the following form:
+```math
+\begin{equation}
+    I_t = \alpha(t)X_0 + \beta(t)X_1 + \gamma(t)W_t
+\end{equation}
+```
+In this example 'alpha', 'beta', and 'gamma' are defined as follows:
+```math
+\begin{equation}
+    \alpha(t) = 1 - t, \quad \beta(t) = t^2, \quad \gamma(t) = 0.1 * (1 - t).
+\end{equation}
+With this formulation, the resulting SDE is of the form:
+```math
+\begin{equation}
+    dX_t = \left[b(X_t, X_0, t) + (g^2(t) - \gamma^2(t)) \right] dt + g(t)dW_t,
+\end{equation}
+```
+where `g` can be chosen (almost) freely. 
 
 ```julia
 # Get Interpolant
@@ -120,9 +150,9 @@ ps, st = Lux.setup(rng, model) .|> dev;
 
 # Setup the optimiser
 opt = Optimisers.AdamW(
-    T(config["optimizer_args"]["learning_rate"]), 
+    config["optimizer_args"]["learning_rate"], 
     (0.9f0, 0.99f0), 
-    T(config["optimizer_args"]["weight_decay"])
+    config["optimizer_args"]["weight_decay"]
 );
 
 # Initialise the optimiser
@@ -145,4 +175,26 @@ ps, st = train_stochastic_interpolant(
     rng=rng,
     dev=dev
 );
+```
+
+For easy testing of the model, we can compare the model predictions with the true data. The function `compare_sde_pred_with_true` takes the model, the model weights, the model state, the test data, the test parameters, the number of paths to compute in the SDE ensemble, the data normalizer, the mask, the number of pseudo-steps in the SDE ensemble, the directory to save figures, the random number generator, and the device. The function returns the pathwise mean squared error and the mean mean squared error. The function saves the following figures in the directory specified:
++ Animation of the true data and the model predictions
++ Plot of the total energy evolution
++ Plot of energy spectrum at the last time step
++ plot of temporal energy spectrum and the center point
+```julia
+pathwise_MSE, mean_MSE = compare_sde_pred_with_true(
+    model, # SI model
+    ps, # Model weights
+    Lux.testmode(st), # Model state in test mode
+    testset.state, # Test data
+    testset.pars, # Test parameters
+    5, # Number of paths to compute in SDE ensemble
+    normalize_data, # Data normalizer
+    mask, # Mask
+    50, # Number of pseudo-steps in SDE ensemble
+    "$(checkpoint_manager.figures_dir)/forecasting", # Directory to save figures
+    rng, # Random number generator
+    dev, # Device
+)
 ```
