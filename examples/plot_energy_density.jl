@@ -39,20 +39,21 @@ trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars =
     test_case, 
     test_args,
 );
-
-energy = compute_total_energy(trainset)
+omega = [0.04908f0, 0.04908f0]
+energy = compute_total_energy(trainset, omega)
 
 t_vec = LinRange(0.0, 80.0, 3200)
 # t_vec = reshape(t_vec, 3200, 1)
 # t_vec = repeat(t_vec, 1, 45)
 
-i = 2500
+i = 10
 k = kde(energy[i, :])
 ik = InterpKDE(k)
 z = pdf(ik, energy[i, :])
 
+true_energy_flat = reshape(energy, 250*45)
 histogram(
-    energy[i, :], bins=25, label="Histogram", 
+    true_energy_flat, bins=50, label="Histogram True", 
     xlabel="Energy", ylabel="Frequency", 
     title="Histogram of Energy", normed=true
 )

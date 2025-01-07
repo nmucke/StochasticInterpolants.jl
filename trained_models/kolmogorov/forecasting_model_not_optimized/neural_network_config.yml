@@ -37,7 +37,7 @@ model_args:
   model_type: "conv_next_u_net"
 diffusion_args:
   multiplier: 0.1
-  type: "follmer_optimal"
+  type: "linear"
 optimizer_args:
   betas:
     - 0.9
