@@ -8,6 +8,26 @@ using LinearAlgebra
 using GPUArraysCore
 using StochasticInterpolants
 
+export modulate, ConditionalDiffusionTransformer, parameter_diffusion_transformer_block
+export DiffusionTransformerBlock, FinalLayer, DiffusionTransformer
+
+"""
+    modulate(x, scale, shift)
+
+Modulate the input tensor `x` by scaling and shifting it.
+"""
+
+function modulate(x, scale, shift)
+
+    # Scale
+    x = x .* (1.0f0 .+ scale)
+
+    # Shift
+    x = x .+ shift    
+
+    return x
+end
+
 """
 ConditionalDiffusionTransformer(
     imsize::Dims{2}=(256, 256),
@@ -196,7 +216,6 @@ function parameter_diffusion_transformer_block(;
     number_patches::Int
 )
     @compact(
-        norm = Lux.InstanceNorm(in_channels),
 
         pars_embedding = Lux.Chain(
             Lux.Dense(pars_dim => embed_dim),
@@ -209,18 +228,22 @@ function parameter_diffusion_transformer_block(;
         ),
         positional_embedding = ViPosEmbedding(embed_dim, number_patches),
         dit_block = DiffusionTransformerBlock(embed_dim, number_heads, mlp_ratio),
-        final_layer = FinalLayer(embed_dim, patch_size, out_channels), # (E, patch_size ** 2 * out_channels, N)
+        final_layer = Chain(
+            Lux.LayerNorm((embed_dim, 1); affine=false),
+            Lux.Dense(embed_dim => patch_size[1] * patch_size[2] * out_channels)
+        ),
     ) do x
         x, pars = x
 
         pars = pars_embedding(pars)
 
         x = patchify_layer(x)
+
         x = positional_embedding(x)
 
         x = dit_block((x, pars))
 
-        x = final_layer((x, pars))
+        x = final_layer(x)
 
         h = div(imsize[1], patch_size[1])
         w = div(imsize[2], patch_size[2])
@@ -313,10 +336,13 @@ function (dit_block::DiffusionTransformerBlock)(
 
     x, st_new = dit_block.layer_norm_2(x, ps.layer_norm_2, st.layer_norm_2)
     @set! st.layer_norm_2 = st_new
+
     x = modulate(x, scale_mlp, shift_mlp)
+
     mlp_out, st_new = dit_block.mlp(x, ps.mlp, st.mlp)
-    x = x .+ gate_mlp .* mlp_out
     @set! st.mlp = st_new
+
+    x = x .+ gate_mlp .* mlp_out
 
     return x, st
 end
@@ -450,7 +476,12 @@ function DiffusionTransformer(;
         [DiffusionTransformerBlock(embedding_dims, num_heads, mlp_ratio) for _ in 1:depth]...;
     )
 
-    final_layer = FinalLayer(embedding_dims, patch_size, out_channels) # (E, patch_size ** 2 * out_channels, N)
+    final_layer = Chain(
+        Lux.LayerNorm((embedding_dims, 1); affine=false),
+        Lux.Dense(embedding_dims => patch_size[1] * patch_size[2] * out_channels)
+    ) # (patch_size ** 2 * out_channels, N)
+
+    # FinalLayer(embedding_dims, patch_size, out_channels) # (E, patch_size ** 2 * out_channels, N)
 
     h = div(image_size[1], patch_size[1])
     w = div(image_size[2], patch_size[2])
@@ -483,7 +514,7 @@ function (dt::DiffusionTransformer)(
         @set! st.dit_blocks[layer_name] = new_st
     end
 
-    x, st_new = dt.final_layer((x, t), ps.final_layer, st.final_layer)
+    x, st_new = dt.final_layer(x, ps.final_layer, st.final_layer)
     @set! st.final_layer = st_new
 
     x = dt.unpatchify(x)

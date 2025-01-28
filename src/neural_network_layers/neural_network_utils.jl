@@ -10,6 +10,8 @@ using Lux.Experimental: @compact
 using Lux.Experimental: @kwdef
 using Lux.Experimental: @concrete
 
+export pars_cat, transform_to_nothing, Identity, StateParsIdentity, get_padding, get_attention_layer
+
 function pars_cat(x::AbstractArray, y::Nothing; dims=1)
     return x
 end
@@ -65,6 +67,7 @@ function get_attention_layer(
     embed_dim,
     num_heads,
     t_pars_embedding_dims=nothing,
+    patch_size=(8, 8)
 )
 
     if attention_type == "linear"
@@ -100,8 +103,8 @@ function get_attention_layer(
             number_heads=num_heads,
             mlp_ratio=2,
             imsize=imsize,
-            patch_size=(1, 1),
-            number_patches=prod(div.(imsize, (1, 1)))
+            patch_size=patch_size,
+            number_patches=prod(div.(imsize, patch_size))
         )
     else
         attention_layer = Identity()

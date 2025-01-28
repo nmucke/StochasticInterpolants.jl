@@ -419,17 +419,17 @@ function forecasting_sde_sampler(
 
     end
 
-    # Initial step
-    z = randn!(rng, similar(x, size(x)))
-    dW = sqrt(dt) .* z
+    # # Initial step
+    # z = randn!(rng, similar(x, size(x)))
+    # dW = sqrt(dt) .* z
 
 
-    t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1]) |> dev 
-    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true);
+    # t = fill!(similar(x, 1, 1, 1, size(x)[end]), timesteps[1]) |> dev 
+    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true);
 
-    # Initial step
-    # x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
-    x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
+    # # Initial step
+    # # x = x + vel_t .* dt .+ model.diffusion_coefficient(t) .* dW
+    # x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
 
     # Remaining steps
     drift_term(t, x, pars, ps, st) = model.drift_term(t, x, x_0, pars, ps, st);#; phys_vel=phys_vel_t)
@@ -441,27 +441,27 @@ function forecasting_sde_sampler(
         diffusion_term,
         x,
         pars,
-        timesteps[2:end-1],
+        timesteps[1:end],
         ps,
         st,
         rng,
         dev
     )
 
-    # Final step
-    z = randn(rng, size(x_0)) |> dev
-    z = randn!(rng, similar(x, size(x)))
+    # # Final step
+    # z = randn(rng, size(x_0)) |> dev
+    # z = randn!(rng, similar(x, size(x)))
 
-    dt = Float32.(timesteps[end] - timesteps[end-1])
-    dW = sqrt(dt) .* z
+    # dt = Float32.(timesteps[end] - timesteps[end-1])
+    # dW = sqrt(dt) .* z
     
-    t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
-    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true); #, phys_vel=phys_vel_t)
-    vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=false);
+    # t = timesteps[end-1] .* ones(1, 1, 1, size(x)[end]) |> dev
+    # # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=true); #, phys_vel=phys_vel_t)
+    # vel_t, st = model.drift_term(t, x, x_0, pars, ps, st; ode_mode=false);
 
-    t = repeat(t, size(x)[1:3]...)
-    # x = x + vel_t .* dt .+ model.gamma(t) .* dw  
-    x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
+    # t = repeat(t, size(x)[1:3]...)
+    # # x = x + vel_t .* dt .+ model.gamma(t) .* dw  
+    # x = x + vel_t .* dt .+ model.diffusion_term(t, x, x_0, pars, ps, st) .* dW
 
     if !isnothing(model.projection)
         x = model.projection(x, dev)

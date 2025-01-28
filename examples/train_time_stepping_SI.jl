@@ -1,6 +1,7 @@
 ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "20GiB"
 ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
 
+using JLD2
 using StochasticInterpolants
 using Lux
 using YAML
@@ -9,6 +10,7 @@ using NPZ
 using LuxCUDA
 using Optimisers
 using FileIO
+using NNlib
 
 CUDA.reclaim()
 GC.gc()
@@ -35,7 +37,7 @@ test_case = "kolmogorov";
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_low";
+test_args = "default";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -50,7 +52,8 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 ##### Hyperparameters #####
 continue_training = true;
 model_base_dir = "trained_models/";
-model_name = "forecasting_model_not_optimized";
+# model_name = "forecasting_model_optimized_project_structure";
+model_name = "forecasting_model_optimized_project_new_new";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -60,6 +63,7 @@ if continue_training
     config = checkpoint_manager.neural_network_config
 else
     # config = YAML.load_file("configs/neural_networks/$(test_case)_dit.yml");
+    # config = YAML.load_file("configs/neural_networks/$(test_case)_structure.yml")
     config = YAML.load_file("configs/neural_networks/$test_case.yml")
     
     checkpoint_manager = CheckpointManager(
@@ -78,42 +82,39 @@ trainset = prepare_data_for_time_stepping(
 
 ##### Forecasting SI model #####
 # Define the velocity model
+velocity = PhysicsConsistentModel(
+    (H, W),
+    config["model_args"]
+);
+
 velocity = get_SI_neural_network(;
     image_size=(H, W),
     model_params=config["model_args"]
 );
 
-
 # Get Interpolant
-interpolant = get_interpolant(
-    config["interpolant_args"]["alpha"],
-    config["interpolant_args"]["beta"],
-    config["interpolant_args"]["gamma"],
-    T(config["interpolant_args"]["gamma_multiplier"]),
+# interpolant = get_interpolant(
+#     config["interpolant_args"]["alpha"],
+#     config["interpolant_args"]["beta"],
+#     config["interpolant_args"]["gamma"],
+#     T(config["interpolant_args"]["gamma_multiplier"]),
+#     T(config["interpolant_args"]["coefs"]),
+# );
+
+coefs = [
+    -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+    -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+];
+coefs = coefs .|> T;
+
+interpolant = Interpolant( 
+    t -> get_alpha_series(t, coefs[1, :]), 
+    t -> get_beta_series(t, coefs[2, :]), 
+    t -> get_dalpha_series_dt(t, coefs[1, :]),
+    t -> get_dbeta_series_dt(t, coefs[2, :]), 
+    t -> 0.1f0 .* (1f0 .- t),
+    t -> -1f0 .* 0.1f0
 );
-
-# coefs = [
-#     -1.49748  -0.181875   0.127546  -0.0188962  -0.0104655  -0.00495827  -0.00481044  -0.00316509;
-#     -1.89775   0.182452  -0.224247   0.0196697  -0.0101798   0.00545455  -0.00265759   0.00324879;
-#     -4.94467  -1.35222   -0.68816   -0.400287   -0.276452   -0.174084    -0.11204     -0.0665296
-# ];
-# # Cast to float32
-# coefs = coefs .|> T;
-
-# coefs = [
-#     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-#     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-# ]
-# coefs = coefs .|> T;
-
-# interpolant = Interpolant(
-#     t -> get_alpha_series(t, coefs[1, :]), 
-#     t -> get_beta_series(t, coefs[2, :]), 
-#     t -> get_dalpha_series_dt(t, coefs[1, :]),
-#     t -> get_dbeta_series_dt(t, coefs[2, :]), 
-#     t -> 0.1f0 .* (1f0 .- t),
-#     t -> -1f0 .* 0.1f0
-# )
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(
@@ -159,14 +160,14 @@ end;
 ps, st = train_stochastic_interpolant(
     model=model,
     ps=ps,
-    st=st,
+    st=st,  
     opt_state=opt_state,
     trainset=trainset, 
     testset=(state=testset, pars=testset_pars),
     checkpoint_manager=checkpoint_manager,
     training_args=config["training_args"],
     normalize_data=normalize_data,
-    mask=mask,  
+    mask=mask,
     rng=rng,
     dev=dev
 );
@@ -176,8 +177,26 @@ CUDA.reclaim()
 GC.gc()
 
 
+velocity = PhysicsConsistentModel(
+    (H, W),
+    config["model_args"]
+);
+ps, st = Lux.setup(rng, velocity) .|> dev;
+
+batch_size = 16;
+i = 1;
+x_1 = trainset.target_distribution[:, :, :, i:i+batch_size-1] |> dev;
+x_0 = trainset.init_distribution[:, :, :, :, i:i+batch_size-1] |> dev;
+
+x_history = x_0;
+x_0 = x_0[:, :, :, end, :];
+
+t = rand!(rng, similar(x_1, 1, 1, 1, batch_size));
+pars = trainset.pars_distribution[:, i:i+batch_size-1] |> dev;
 
 
+
+out, st = velocity((x_0, x_history, pars, t), ps, st)
 
 
 

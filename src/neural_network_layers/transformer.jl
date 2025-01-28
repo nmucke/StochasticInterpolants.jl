@@ -10,6 +10,10 @@ using GPUArraysCore
 # import Boltz.VisionTransformerEncoder
 # import Boltz.MultiHeadAttention as MultiHeadAttention
 
+export PositionEncoding, PositionEncoding, MultiHeadSelfAttention, LinearMultiHeadSelfAttention
+export LinearSpatialAttention, patchify, unpatchify, SpatialAttention, VisionTransformerEncoder
+
+
 """
     position_encoding(dim_embedding::Int, max_length::Int=1000)
 
@@ -94,23 +98,53 @@ Multi-head self-attention layer
   - `attn_dropout_prob`: dropout probability after the self-attention layer
   - `proj_dropout_prob`: dropout probability after the projection layer
 """
+# function MultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
+#         attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0) where {T}
+#     # @argcheck in_planes % number_heads == 0
+
+#     qkv_layer = Lux.Dense(in_planes, in_planes * 3; use_bias=qkv_bias)
+#     attention_dropout = Lux.Dropout(attention_dropout_rate)
+#     projection = Lux.Chain(
+#         Lux.Dense(in_planes => in_planes), Lux.Dropout(projection_dropout_rate))
+
+#     return Lux.@compact(; number_heads, qkv_layer, attention_dropout,
+#         projection, dispatch=:MultiHeadSelfAttention) do x::AbstractArray{<:Real, 3}
+#         qkv = qkv_layer(x)
+#         q, k, v = _fast_chunk(qkv, Val(3), Val(1))
+#         y, _ = NNlib.dot_product_attention(
+#             q, k, v; fdrop=attention_dropout, nheads=number_heads)
+#         @return projection(y)
+#     end
+# end
+
 function MultiHeadSelfAttention(in_planes::Int, number_heads::Int; qkv_bias::Bool=false,
-        attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0) where {T}
-    # @argcheck in_planes % number_heads == 0
+    attention_dropout_rate::T=0.0f0, projection_dropout_rate::T=0.0f0) where {T}
+# @argcheck in_planes % number_heads == 0
 
-    qkv_layer = Lux.Dense(in_planes, in_planes * 3; use_bias=qkv_bias)
-    attention_dropout = Lux.Dropout(attention_dropout_rate)
-    projection = Lux.Chain(
-        Lux.Dense(in_planes => in_planes), Lux.Dropout(projection_dropout_rate))
+qkv_layer = Lux.Dense(in_planes, in_planes * number_heads * 3; use_bias=qkv_bias)
+attention_dropout = Lux.Dropout(attention_dropout_rate)
+projection = Lux.Chain(
+    Lux.Dense(in_planes * number_heads => in_planes), Lux.Dropout(projection_dropout_rate))
 
-    return Lux.@compact(; number_heads, qkv_layer, attention_dropout,
-        projection, dispatch=:MultiHeadSelfAttention) do x::AbstractArray{<:Real, 3}
-        qkv = qkv_layer(x)
-        q, k, v = _fast_chunk(qkv, Val(3), Val(1))
-        y, _ = NNlib.dot_product_attention(
-            q, k, v; fdrop=attention_dropout, nheads=number_heads)
-        @return projection(y)
-    end
+return Lux.@compact(; number_heads, qkv_layer, attention_dropout,
+    projection, dispatch=:MultiHeadSelfAttention) do x::AbstractArray{<:Real, 3}
+    qkv = qkv_layer(x)
+
+    q, k, v = _fast_chunk(qkv, Val(3), Val(1))
+    y, _ = NNlib.dot_product_attention(
+        q, k, v; fdrop=attention_dropout, nheads=number_heads)
+
+    # q = Float16.(q)
+    # k = Float16.(k)
+    # v = Float16.(v)
+
+    # q = reshape(x, size(x, 1) ÷ number_heads, number_heads, size(x)[2:end]...)
+    # k = reshape(x, size(x, 1) ÷ number_heads, number_heads, size(x)[2:end]...)
+    # v = reshape(x, size(x, 1) ÷ number_heads, number_heads, size(x)[2:end]...)
+
+    # y = flash_attention(q, k, v)
+    @return projection(y)
+end
 end
 
 
@@ -180,15 +214,13 @@ function LinearSpatialAttention(;
     dropout_rate=0.1f0,
 )
     @compact(
-        # norm = Lux.LayerNorm((in_channels, 1); affine=true),
+        norm = Lux.LayerNorm((in_channels, 1); affine=true),
         _patchify = patchify(
             imsize; 
             in_channels=in_channels, 
             patch_size=(1, 1), 
             embed_planes=embed_dim * num_heads
         ),
-        position_encoding = convert(Array{Float32}, make_position_encoding(embed_dim * num_heads, imsize[1]*imsize[2])),
-        norm_1 = Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
         attn = LinearMultiHeadSelfAttention(
             embed_dim * num_heads,
             num_heads; 
@@ -197,68 +229,29 @@ function LinearSpatialAttention(;
         ),
         norm_2 = Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
         conv_out = Lux.Chain(
-            # Lux.Dense(embed_dim * num_heads => embed_dim * num_heads),
             Lux.Dense(embed_dim * num_heads => in_channels),
-            # NNlib.gelu,
-            # Lux.LayerNorm((embed_dim * num_heads, imsize[1]*imsize[2])),
             Lux.LayerNorm((in_channels, imsize[1]*imsize[2])),
-            # Lux.Dropout(dropout_rate),
-            # Lux.Dense(embed_dim * num_heads => in_channels),
         ),
-        # skip_conv = Lux.Dense(embed_dim * num_heads => in_channels)
 
         
     ) do x
+        x_skip = x
+        
+        x = norm(x)
+
         x = _patchify(x) # (Nx, Ny, C, B) -> (E * H, Nx*Ny, B)
-
-        x = x .+ position_encoding
-
-        # x_skip = x
-
-        x = norm_1(x)
 
         x = attn(x)
 
-        # x += x_skip
-
-        # x = norm_2(x)
-
-        # x_skip = x
-
         x = conv_out(x) # (E * H, Nx*Ny, B) -> (C, Nx*Ny, B)
-
-        # x = x + skip_conv(x_skip)
 
         x = unpatchify(x, imsize, (1, 1), in_channels) # (C, Nx*Ny, B) - > (Nx, Ny, C, B)
 
-        @return x
+        @return x + x_skip
 
     end
 end
 
-
-
-
-###############################################################################
-# Diffusion Transformer
-###############################################################################
-
-"""
-    modulate(x, scale, shift)
-
-Modulate the input tensor `x` by scaling and shifting it.
-"""
-
-function modulate(x, scale, shift)
-
-    # Scale
-    x = x .* (1.0f0 .+ scale)
-
-    # Shift
-    x = x .+ shift    
-
-    return x
-end
 
 """
     patchify(
@@ -321,6 +314,7 @@ function SpatialAttention(;
     embed_dim,
     num_heads=1,
     dropout_rate=0.1f0,
+    patch_size=(1, 1)
 )
     @compact(
         # norm = Lux.LayerNorm((in_channels, 1); affine=true),
@@ -328,7 +322,7 @@ function SpatialAttention(;
         _patchify = patchify(
             imsize; 
             in_channels=in_channels, 
-            patch_size=(1, 1), 
+            patch_size=patch_size, 
             embed_planes=embed_dim
         ),
         attn = MultiHeadSelfAttention(
@@ -337,11 +331,6 @@ function SpatialAttention(;
             attention_dropout_rate=dropout_rate,
             projection_dropout_rate=dropout_rate
         ),
-        conv_out = Lux.Chain(
-            Lux.Conv((1, 1), embed_dim => in_channels),
-            Lux.InstanceNorm(in_channels),
-            # Lux.LayerNorm((in_channels, 1); affine=true),
-        )
 
         
     ) do x
@@ -350,7 +339,6 @@ function SpatialAttention(;
         x = _patchify(x)
         x = attn(x)
         x = unpatchify(x, imsize, (1, 1), embed_dim)
-        x = conv_out(x)
         @return x + x_in
     end
 end

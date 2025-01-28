@@ -31,24 +31,30 @@ function Interpolant(
     return (; alpha, beta, dalpha_dt, dbeta_dt, interpolant, dinterpolant_dt, gamma, dgamma_dt)
 end
 
-function get_alpha(type::String)
+function get_alpha(type::String, coefs=[])
     if type == "linear"
         alpha = t -> 1f0 .- t
         dalpha_dt = t -> -1f0
     elseif type == "quadratic"
         alpha = t -> 1f0 .- t.^2
         dalpha_dt = t -> -2f0 .* t
+    elseif type == "optimal"
+        alpha = t -> get_alpha_series(t, coefs)
+        dalpha_dt = t -> get_dalpha_series_dt(t, coefs)
     end
     return alpha, dalpha_dt
 end
 
-function get_beta(type::String)
+function get_beta(type::String, coefs=[])
     if type == "linear"
         beta = t -> t
         dbeta_dt = t -> t
     elseif type == "quadratic"
         beta = t -> t.^2
         dbeta_dt = t -> 2f0 .* t
+    elseif type == "optimal"
+        beta = t -> get_beta_series(t, coefs)
+        dbeta_dt = t -> get_dbeta_series_dt(t, coefs)
     end
     return beta, dbeta_dt
 end
@@ -69,9 +75,10 @@ function get_interpolant(
     beta_type::String,
     gamma_type::String,
     gamma_multiplier,
+    coefs=[]
 )
-    alpha, dalpha_dt = get_alpha(alpha_type)
-    beta, dbeta_dt = get_beta(beta_type)
+    alpha, dalpha_dt = get_alpha(alpha_type, coefs)
+    beta, dbeta_dt = get_beta(beta_type, coefs)
     gamma, dgamma_dt = get_gamma(gamma_type, gamma_multiplier)
 
     return Interpolant(alpha, beta, dalpha_dt, dbeta_dt, gamma, dgamma_dt)

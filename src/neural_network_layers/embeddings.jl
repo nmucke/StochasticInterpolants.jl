@@ -6,6 +6,8 @@ using Setfield
 using ArrayPadding
 using LinearAlgebra
 
+export sinusoidal_embedding, ViPosEmbedding, get_t_pars_embedding
+
 
 ###############################################################################
 # sinusoidal_embedding

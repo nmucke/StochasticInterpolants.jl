@@ -10,6 +10,10 @@ using Lux.Experimental: @compact
 using Lux.Experimental: @kwdef
 using Lux.Experimental: @concrete
 
+export conv_next_block_no_pars, multiple_conv_next_blocks_no_pars
+export conv_next_block, multiple_conv_next_blocks
+export ConvNextUNetWithPars, ConvNextUNetNoPars
+
 
 ###############################################################################
 # Conv Next Block
@@ -268,10 +272,12 @@ function ConvNextUNetWithPars(;
         push!(
             conv_down_blocks, 
             multiple_conv_next_blocks(
+            # conv_next_block(
                 in_channels=channels[i], 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
                 embedding_dims=embedding_dims,
+                # pars_embed_dim=embedding_dims,
                 padding=padding
             )
         )
@@ -308,9 +314,13 @@ function ConvNextUNetWithPars(;
     )
 
 
-    bottleneck_attn = attention_layer(
-        imsize, channels[end], attention_embedding_dims, num_heads
-    )
+    if use_attention_in_layer[end]
+        bottleneck_attn = attention_layer(
+            imsize, channels[end], attention_embedding_dims, num_heads
+        )
+    else
+        bottleneck_attn = StateParsIdentity()
+    end
 
     bottleneck2 = conv_next_block(
         in_channels=channels[end], 
@@ -320,8 +330,8 @@ function ConvNextUNetWithPars(;
         padding=padding
     )
 
-    reverse!(channels)
-    reverse!(use_attention_in_layer)
+    channels = reverse(channels)
+    use_attention_in_layer = reverse(use_attention_in_layer)
     conv_up_blocks = []
     attn_up_blocks = []
     up_blocks = []
@@ -338,10 +348,12 @@ function ConvNextUNetWithPars(;
         push!(
             conv_up_blocks, 
             multiple_conv_next_blocks(
+            # conv_next_block(
                 in_channels=channels[i] * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
                 embedding_dims=embedding_dims,
+                # pars_embed_dim=embedding_dims,
                 padding=padding
             )
         )
@@ -385,7 +397,7 @@ function (conv_next_unet::ConvNextUNetWithPars)(
     
     skips = (x, )
     for i in 1:length(conv_next_unet.conv_down_blocks)
-
+        
         conv_layer_name = Symbol(:layer_, i)
         x, new_st = conv_next_unet.conv_down_blocks[i](
             (x, t_emb), ps.conv_down_blocks[conv_layer_name], st.conv_down_blocks[conv_layer_name]
@@ -515,7 +527,8 @@ function ConvNextUNetNoPars(;
 
         push!(
             conv_down_blocks, 
-            multiple_conv_next_blocks_no_pars(
+            # multiple_conv_next_blocks_no_pars
+            conv_next_blocks_no_pars(
                 in_channels=channels[i], 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
@@ -525,7 +538,7 @@ function ConvNextUNetNoPars(;
 
         if use_attention_in_layer[i]
             push!(attn_down_blocks, attention_layer(
-                imsize, channels[i + 1], attention_embedding_dims, num_heads,
+                imsize, channels[i + 1], channels[i + 1], num_heads,
             ))
         else
             push!(attn_down_blocks, StateParsIdentity())
@@ -555,7 +568,7 @@ function ConvNextUNetNoPars(;
 
 
     bottleneck_attn = attention_layer(
-        imsize, channels[end], attention_embedding_dims, num_heads
+        imsize, channels[end], channels[end], num_heads
     )
 
     bottleneck2 = conv_next_block_no_pars(
@@ -582,7 +595,8 @@ function ConvNextUNetNoPars(;
         imsize = div.(image_size, 2^(length(channels) - i - 1))
         push!(
             conv_up_blocks, 
-            multiple_conv_next_blocks_no_pars(
+            # multiple_conv_next_blocks_no_pars
+            conv_next_blocks_no_pars(
                 in_channels=channels[i] * 2, 
                 out_channels=channels[i + 1], 
                 multiplier=multiplier,
@@ -592,7 +606,7 @@ function ConvNextUNetNoPars(;
 
         if use_attention_in_layer[i]
             push!(attn_up_blocks, attention_layer(
-                imsize, channels[i + 1], attention_embedding_dims, num_heads
+                imsize, channels[i + 1], channels[i + 1], num_heads
             ))
         else
             push!(attn_up_blocks, StateParsIdentity())

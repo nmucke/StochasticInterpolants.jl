@@ -113,22 +113,16 @@ setup = Setup(; x = (ax, ax), Re, ArrayType = CuArray{T});
 create_right_hand_side(setup, psolver) = function right_hand_side(u)
     (; Iu) = setup.grid
     u = pad_circular(u, 1; dims = 1:2)
-    # F = map(eachslice(u; dims = ndims(u))) do u
-    # out = fill(similar(u[:, :, :, 1]), 0)
     out = Array{eltype(u)}[]
     for i in 1:size(u, 4)
         t = zero(eltype(u))
-        # u = eachslice(u; dims = ndims(u))
         u_ = u[:, :, 1, i], u[:, :, 2, i]
-        # u = INS.apply_bc_u(u, t, setup)
         F = IncompressibleNavierStokes.momentum(u_, nothing, t, setup)
         F = cat(F[1], F[2]; dims = 3)
         F = F[2:end-1, 2:end-1, :]
         out = [out; [F]]
     end
     stack(out; dims = 4)
-    # cat(out...; dims = 4)
-    # cat(F...; dims = 4)
 end
 
 f = create_right_hand_side(setup, nothing);

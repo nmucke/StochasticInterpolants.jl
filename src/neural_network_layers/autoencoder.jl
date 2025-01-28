@@ -4,6 +4,8 @@ using Random
 using CUDA
 using NNlib
 
+export MultipleBlocks, DownBlock, UpBlock, Encoder, VariationalEncoder, Decoder, Autoencoder, VariationalAutoencoder, VAE_wrapper
+
 function MultipleBlocks(
     in_channels::Int, 
     out_channels::Int; 

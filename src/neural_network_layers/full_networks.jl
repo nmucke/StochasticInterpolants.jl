@@ -1,4 +1,6 @@
 
+export get_history_state_embedding, get_main_model_with_pars, get_main_model_no_pars, get_SI_neural_network, get_encoder_neural_network
+
 function get_history_state_embedding(;
     in_channels::Int,
     init_channels::Int,

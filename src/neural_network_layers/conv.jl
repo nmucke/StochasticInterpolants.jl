@@ -9,6 +9,8 @@ using LinearAlgebra
 # import Boltz.VisionTransformerEncoder
 # import Boltz.MultiHeadAttention as MultiHeadAttention
 
+export residual_block, DownBlock, UpBlock, UNet, ConditionalUNet
+
 
 ###############################################################################
 # residual_block

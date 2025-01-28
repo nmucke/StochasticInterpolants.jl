@@ -1,0 +1,69 @@
+
+training_args:
+  batch_size: 8
+  num_epochs: 1000
+  max_learning_rate: 1.0e-4
+  min_learning_rate: 1.0e-6
+  num_warmup_steps: 10
+  early_stop_patience: 10
+  num_test_paths: 5
+  num_test_sde_steps: 50
+  test_frequency: 50
+
+model_args:
+  pars_dim: 0
+  embedding_dims: 128
+  len_history: 2
+  projection: divergence_free
+  dissipation:
+    in_channels: 2
+    out_channels: 2
+    pars_embed_dim: 128
+    multiplier: 2
+    kernel_size: 5
+    padding: "periodic"
+  forcing:
+    # model_type: "diffusion_transformer"
+    # in_channels: 2
+    # out_channels: 2
+    # embedding_dims: 64
+    # patch_size: 8
+    # depth: 4
+    # mlp_ratio: 4 
+    # num_heads: 4
+    # dropout_rate: 0.1 
+    # embedding_dropout_rate: 0.1
+    # len_history: 2
+    # pars_dim: 0
+    # channels: [8]
+    # padding: "periodic"
+    # projection: null
+    model_type: "conv_next_u_net"
+    in_channels: 2
+    out_channels: 2
+    embedding_dims: 128
+    channels: [8, 16, 32, 64]
+    attention_type: "DiT" # "linear" or "standard" or "DiT"
+    use_attention_in_layer: [false, false, false, false, true] # [true, true, true, true];
+    attention_embedding_dims: 64
+    num_heads: 4
+    projection: divergence_free
+    len_history: 2
+    padding: "periodic"
+    pars_dim: 0
+
+optimizer_args:
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-8
+  betas: [0.9, 0.999]
+
+interpolant_args:
+  alpha: "linear"
+  beta: "quadratic"
+  gamma: "linear"
+  gamma_multiplier: 1.0e-1
+  coefs: []
+
+diffusion_args:
+  type: "linear"
+  multiplier: 1.0e-1
