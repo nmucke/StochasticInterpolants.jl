@@ -1,4 +1,4 @@
-ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "20GiB"
+ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "10GiB"
 ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
 
 using JLD2
@@ -11,6 +11,7 @@ using LuxCUDA
 using Optimisers
 using FileIO
 using BenchmarkTools
+using Plots
 
 CUDA.reclaim()
 GC.gc()
@@ -79,7 +80,7 @@ interpolant = get_interpolant(
     config["interpolant_args"]["gamma_multiplier"] |> Float32,
 );
 
-if model_name == "forecasting_model_optimized" || model_name == "forecasting_model_optimized_new"  || model_name == "forecasting_model_optimized_refactored"
+if model_name == "forecasting_model_optimized" || model_name == "forecasting_model_optimized_new"  || model_name == "forecasting_model_optimized_refactored" || model_name == "forecasting_model_optimized_project_new"
     print("Using optimized coefficients")
 
     coefs = [
@@ -97,7 +98,7 @@ if model_name == "forecasting_model_optimized" || model_name == "forecasting_mod
         t -> -1f0 .* 0.1f0
     )
 end;
-
+interpolant
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(
     config["diffusion_args"]["type"],
@@ -106,10 +107,11 @@ diffusion_coefficient = get_diffusion_coefficient(
 
 if config["model_args"]["projection"] == "divergence_free"
     projection = project_onto_divergence_free;
+elseif config["model_args"]["projection"] == "projection_with_obstacle"
+    projection = projection_with_obstacle;
 else
     projection = nothing;
 end;
-projection = nothing;
 
 # Initialise the SI model
 model = FollmerStochasticInterpolant(
@@ -131,20 +133,72 @@ num_test_trajectories = size(testset, 5);
 num_test_paths = 5;
 num_generator_steps = 100
 
-@time compare_sde_pred_with_true(
-    model,
-    ps,
-    st_,
-    testset,
-    testset_pars,
-    num_test_paths,
-    normalize_data,
-    mask,
-    num_generator_steps,
-    "$(model_name)_$(num_generator_steps)",
-    rng,
-    dev,
-)
+
+
+omega = [0.04908f0, 0.04908f0]
+
+st_ = Lux.testmode(st);
+num_test_trajectories = size(testset, 5);
+num_test_paths = 5;
+energy_spectrum_true, k_bins = compute_energy_spectra(testset[:, :, :, end, :]);
+
+for num_generator_steps = [100]
+    pred_sol = zeros(H, W, C, num_steps, num_test_paths, num_test_trajectories);
+    energy_pred = zeros(num_steps, num_test_paths, num_test_trajectories);
+    energy_spectrum_pred = zeros(size(k_bins,1), num_test_paths, num_test_trajectories);
+
+    for i in 1:num_test_trajectories
+        sol = compute_multiple_SDE_steps(
+            init_condition=testset[:, :, :, 1:config["model_args"]["len_history"], i],
+            parameters=testset_pars[:, 1:1, i],
+            num_physical_steps=size(testset, 4),
+            num_generator_steps=num_generator_steps,
+            num_paths=num_test_paths,
+            model=model,
+            ps=ps,
+            st=st_,
+            rng=rng,
+            dev=gpu_device(),
+            mask=nothing,
+        )
+        pred_sol[:, :, :, :, :, i] = sol;
+        # energy_pred[:, :, i] = compute_total_energy(sol, omega);
+        # energy_spectrum_pred[:, :, i], _ = compute_energy_spectra(sol[:, :, :, end, :]);
+    end;
+    save("$(model_name)$(num_generator_steps).jld2", "data", pred_sol)
+
+end;
+
+
+
+
+
+
+
+
+
+
+projection = project_onto_divergence_free;
+
+# Initialise the SI model
+model = FollmerStochasticInterpolant(
+    velocity; 
+    interpolant=interpolant,
+    diffusion_coefficient=diffusion_coefficient,
+    projection=projection,
+    len_history=config["model_args"]["len_history"],
+    dev=dev
+);
+
+weights_and_states = checkpoint_manager.load_model();
+ps = weights_and_states.ps |> dev;
+st = weights_and_states.st |> dev;
+
+##### Test stochastic interpolant #####
+st_ = Lux.testmode(st);
+num_test_trajectories = size(testset, 5);
+num_test_paths = 5;
+num_generator_steps = 100
 
 
 
@@ -153,9 +207,61 @@ omega = [0.04908f0, 0.04908f0]
 st_ = Lux.testmode(st);
 num_test_trajectories = size(testset, 5);
 num_test_paths = 5;
-
-using Plots
 energy_spectrum_true, k_bins = compute_energy_spectra(testset[:, :, :, end, :]);
+
+for num_generator_steps = [10, 25, 50, 100]
+    pred_sol = zeros(H, W, C, num_steps, num_test_paths, num_test_trajectories);
+    energy_pred = zeros(num_steps, num_test_paths, num_test_trajectories);
+    energy_spectrum_pred = zeros(size(k_bins,1), num_test_paths, num_test_trajectories);
+
+    for i in 1:num_test_trajectories
+        sol = compute_multiple_SDE_steps(
+            init_condition=testset[:, :, :, 1:config["model_args"]["len_history"], i],
+            parameters=testset_pars[:, 1:1, i],
+            num_physical_steps=size(testset, 4),
+            num_generator_steps=num_generator_steps,
+            num_paths=num_test_paths,
+            model=model,
+            ps=ps,
+            st=st_,
+            rng=rng,
+            dev=gpu_device(),
+            mask=nothing,
+        )
+        pred_sol[:, :, :, :, :, i] = sol;
+        # energy_pred[:, :, i] = compute_total_energy(sol, omega);
+        # energy_spectrum_pred[:, :, i], _ = compute_energy_spectra(sol[:, :, :, end, :]);
+    end;
+    save("$(model_name)_with_projection_$(num_generator_steps).jld2", "data", pred_sol)
+
+end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 for num_generator_steps = [10, 25, 50, 100]
     pred_sol = zeros(H, W, C, num_steps, num_test_paths, num_test_trajectories);
     energy_pred = zeros(num_steps, num_test_paths, num_test_trajectories);
@@ -175,10 +281,10 @@ for num_generator_steps = [10, 25, 50, 100]
             mask=nothing,
         )
         pred_sol[:, :, :, :, :, i] = sol;
-        energy_pred[:, :, i] = compute_total_energy(sol, omega);
-        energy_spectrum_pred[:, :, i], _ = compute_energy_spectra(sol[:, :, :, end, :]);
+        # energy_pred[:, :, i] = compute_total_energy(sol, omega);
+        # energy_spectrum_pred[:, :, i], _ = compute_energy_spectra(sol[:, :, :, end, :]);
     end;
-    save("$(model_name)_$(num_generator_steps).jld2", "data", pred_sol)
+    save("$(model_name)_no_projection_$(num_generator_steps).jld2", "data", pred_sol)
 
 end;
 
@@ -209,6 +315,23 @@ plot!(t_vec, reshape(energy_pred, num_steps, num_test_paths*num_test_trajectorie
 
 
 save("testset.jld2", "data", testset)
+
+
+@time compare_sde_pred_with_true(
+    model,
+    ps,
+    st_,
+    testset,
+    testset_pars,
+    num_test_paths,
+    normalize_data,
+    mask,
+    num_generator_steps,
+    "$(model_name)_$(num_generator_steps)",
+    rng,
+    dev,
+)
+
 
 
 

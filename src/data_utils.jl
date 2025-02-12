@@ -96,11 +96,11 @@ function load_incompressible_flow_data(;
             timestep = lpad(string(j), 6, '0')
 
             velocity = load_npz("$(data_folder)/sim_$(trajectory)/velocity_$(timestep).npz")
-            pressure = load_npz("$(data_folder)/sim_$(trajectory)/pressure_$(timestep).npz")
+            # pressure = load_npz("$(data_folder)/sim_$(trajectory)/pressure_$(timestep).npz")
 
-            data = cat(velocity, pressure, dims=3)
-
-            trainset_state[:, :, :, time_counter, trajectory_counter] = data[:, :, :]
+            # data = cat(velocity, pressure, dims=3)
+            # trainset_state[:, :, :, time_counter, trajectory_counter] = data[:, :, :]
+            trainset_state[:, :, :, time_counter, trajectory_counter] = velocity
             
             pars = JSON.parsefile("$(data_folder)/sim_$(trajectory)/src/description.json")
             trainset_pars[1, time_counter, trajectory_counter] = pars["Reynolds Number"]

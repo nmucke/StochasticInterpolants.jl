@@ -121,7 +121,6 @@ function get_SI_neural_network(;
 
             x = hist_state_embedding((x, x_0))
             t_pars = t_pars_embedding((pars, t))
-
             @return main_model((x, t_pars))
         end
     else

@@ -26,10 +26,10 @@ training_args:
 
 test_args:
   default:
-    ids: [46]
+    ids: [46, 47, 48, 49, 50]
     time_step_info:
       start_time: 1000 # 900
-      num_steps: 50
+      num_steps: 750
       skip_steps: 2
 
 normalize_data: false

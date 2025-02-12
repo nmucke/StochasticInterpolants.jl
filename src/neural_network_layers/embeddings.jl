@@ -103,29 +103,27 @@ function get_t_pars_embedding(
         pars_embedding_dim = div(embedding_dim, 2)
         t_embedding_dim = div(embedding_dim, 2)
         
-        pars_embedding = Chain(
-            x -> sinusoidal_embedding(x, min_freq, max_freq, pars_embedding_dim),
-            Lux.Dense(pars_embedding_dim => pars_embedding_dim),
-            NNlib.gelu,
-            Lux.Dense(pars_embedding_dim => pars_embedding_dim),
-            NNlib.gelu,
-        )
-
-        t_embedding = Chain(
-            x -> sinusoidal_embedding(x, min_freq, max_freq, t_embedding_dim),
-            Lux.Dense(t_embedding_dim => t_embedding_dim),
-            NNlib.gelu,
-            Lux.Dense(t_embedding_dim => t_embedding_dim),
-            NNlib.gelu,
-        )
-
-        t_pars_embedding = Chain(
-            (pars, t) -> begin
-                t_emb = t_embedding(t)
-                pars_emb = pars_embedding(pars)
-                return pars_cat(pars_emb, t_emb; dims=1)
-            end
-        )
+        t_pars_embedding = @compact(
+            pars_embedding = Chain(
+                x -> sinusoidal_embedding(x, min_freq, max_freq, pars_embedding_dim),
+                Lux.Dense(pars_embedding_dim => pars_embedding_dim),
+                NNlib.gelu,
+                Lux.Dense(pars_embedding_dim => pars_embedding_dim),
+                NNlib.gelu,
+            ),
+            t_embedding = Chain(
+                x -> sinusoidal_embedding(x, min_freq, max_freq, t_embedding_dim),
+                Lux.Dense(t_embedding_dim => t_embedding_dim),
+                NNlib.gelu,
+                Lux.Dense(t_embedding_dim => t_embedding_dim),
+                NNlib.gelu,
+            )
+        ) do x
+            pars, t = x
+            t_emb = t_embedding(t)
+            pars_emb = pars_embedding(pars)
+            return pars_cat(pars_emb, t_emb; dims=1)
+        end
 
     else
         pars_embedding_dim = embedding_dim

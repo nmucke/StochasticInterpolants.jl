@@ -128,6 +128,7 @@ export divfunc
 export gradfunc
 export laplacefunc
 export project_onto_divergence_free
+export projection_with_obstacle
 
 
 ##### SI #####

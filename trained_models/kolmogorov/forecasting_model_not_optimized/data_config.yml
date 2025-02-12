@@ -51,12 +51,12 @@ training_args:
     skip_steps: 2
 normalize_data: false
 test_args:
-  pars_low:
+  default:
     ids:
       - 46
     time_step_info:
       start_time: 1000
-      num_steps: 250
+      num_steps: 50
       skip_steps: 2
 norm_mean:
   - 1.766131330172005e-8

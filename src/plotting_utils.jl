@@ -7,8 +7,7 @@ function create_gif(A, filename, plot_titles)
         p = heatmap(
             A[i][:,:,1], legend=false, xticks=false, yticks=false, 
             # clim=(minimum(A[1]), maximum(A[1])), #clim=(0.15, 0.75),
-            aspect_ratio=:equal, 
-            colorbar=true, title=plot_titles[i], color=cgrad(:Spectral_11, rev=true)
+            aspect_ratio=:equal,  title=plot_titles[i], color=cgrad(:Spectral_11, rev=true),
         )
         push!(p_list, p)
     end

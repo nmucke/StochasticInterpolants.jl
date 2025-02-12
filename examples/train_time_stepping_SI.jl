@@ -53,7 +53,7 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 continue_training = true;
 model_base_dir = "trained_models/";
 # model_name = "forecasting_model_optimized_project_structure";
-model_name = "forecasting_model_optimized_project_new_new";
+model_name = "forecasting_model_not_optimized_new";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -82,39 +82,39 @@ trainset = prepare_data_for_time_stepping(
 
 ##### Forecasting SI model #####
 # Define the velocity model
-velocity = PhysicsConsistentModel(
-    (H, W),
-    config["model_args"]
-);
+# velocity = PhysicsConsistentModel(
+#     (H, W),
+#     config["model_args"]
+# );
 
 velocity = get_SI_neural_network(;
     image_size=(H, W),
     model_params=config["model_args"]
-);
+)
 
 # Get Interpolant
-# interpolant = get_interpolant(
-#     config["interpolant_args"]["alpha"],
-#     config["interpolant_args"]["beta"],
-#     config["interpolant_args"]["gamma"],
-#     T(config["interpolant_args"]["gamma_multiplier"]),
-#     T(config["interpolant_args"]["coefs"]),
-# );
-
-coefs = [
-    -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-    -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-];
-coefs = coefs .|> T;
-
-interpolant = Interpolant( 
-    t -> get_alpha_series(t, coefs[1, :]), 
-    t -> get_beta_series(t, coefs[2, :]), 
-    t -> get_dalpha_series_dt(t, coefs[1, :]),
-    t -> get_dbeta_series_dt(t, coefs[2, :]), 
-    t -> 0.1f0 .* (1f0 .- t),
-    t -> -1f0 .* 0.1f0
+interpolant = get_interpolant(
+    config["interpolant_args"]["alpha"],
+    config["interpolant_args"]["beta"],
+    config["interpolant_args"]["gamma"],
+    T(config["interpolant_args"]["gamma_multiplier"]),
+    T.(config["interpolant_args"]["coefs"]),
 );
+
+# coefs = [
+#     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+#     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+# ];
+# coefs = coefs .|> T;
+
+# interpolant = Interpolant( 
+#     t -> get_alpha_series(t, coefs[1, :]), 
+#     t -> get_beta_series(t, coefs[2, :]), 
+#     t -> get_dalpha_series_dt(t, coefs[1, :]),
+#     t -> get_dbeta_series_dt(t, coefs[2, :]), 
+#     t -> 0.1f0 .* (1f0 .- t),
+#     t -> -1f0 .* 0.1f0
+# );
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(
@@ -122,8 +122,11 @@ diffusion_coefficient = get_diffusion_coefficient(
     T(config["diffusion_args"]["multiplier"]),
 );
 
+
 if config["model_args"]["projection"] == "divergence_free"
     projection = project_onto_divergence_free;
+elseif config["model_args"]["projection"] == "projection_with_obstacle"
+    projection = projection_with_obstacle;
 else
     projection = nothing;
 end;
@@ -177,9 +180,10 @@ CUDA.reclaim()
 GC.gc()
 
 
-velocity = PhysicsConsistentModel(
-    (H, W),
-    config["model_args"]
+
+velocity = get_SI_neural_network(;
+    image_size=(H, W),
+    model_params=config["model_args"]
 );
 ps, st = Lux.setup(rng, velocity) .|> dev;
 
@@ -415,37 +419,25 @@ save_checkpoint(
 
 ##### Test stochastic interpolant #####
 st_ = Lux.testmode(st);
-gif_save_path = "output/ode_SI";
+gif_save_path = "lol";
 num_test_paths = 5;
-
-compare_ode_pred_with_true(
-    model,
-    ps,
-    st_,
-    testset,
-    testset_pars,
-    normalize_data,
-    mask,
-    50,
-    dev,
-    gif_save_path,
-)
 
 compare_sde_pred_with_true(
     model,
     ps,
     st_,
-    testset,
-    testset_pars,
+    testset[: ,:, :, :, 1:1],
+    testset_pars[:, :, 1:1],
     num_test_paths,
     normalize_data,
     mask,
-    25,
+    15,
     gif_save_path,
     rng,
     dev,
 )
-
+size(testset_pars)
+size(testset)
 
 
 

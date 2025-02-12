@@ -20,7 +20,7 @@ model_args:
   use_attention_in_layer: [false, false, false, false, true] # [true, true, true, true];
   attention_embedding_dims: 64
   num_heads: 4
-  projection: "divergence_free"
+  projection: null #"divergence_free"
   len_history: 2
   padding: "periodic"
   pars_dim: 0
