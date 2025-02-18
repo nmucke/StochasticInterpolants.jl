@@ -1,7 +1,7 @@
 
 using FFTW
 using Statistics
-
+using Plots
 
 """
     compute_SDE_trajectories_RMSE(
@@ -87,6 +87,75 @@ function compute_spatial_frequency()
 
 end
 
+
+function get_pearson_correlation(pred, _true)
+    H, W, C, num_steps, nums_paths, num_trajectories = size(pred)
+
+    pred = reshape(pred, H*W*C, num_steps, nums_paths, num_trajectories)
+    _true = reshape(_true, H*W*C, num_steps, num_trajectories)
+
+    corr = zeros(num_steps, nums_paths, num_trajectories)
+    for i in 1:num_steps
+        for j in 1:nums_paths
+            for k in 1:num_trajectories
+                corr[i, j, k] = cor(pred[:, i, j, k], _true[:, i, k])
+            end
+        end
+    end
+    
+    return corr
+end
+
+
+function get_energy_spectra(pred)
+
+    num_trajectories = size(pred, 6)
+    num_paths = size(pred, 5)
+    num_steps = size(pred, 4)
+
+    # Compute energy spectra
+    energy_spectrum = []
+    for trajectory in 1:num_trajectories
+        energy_spectrum_trajectory = []
+        for ti = 1:num_steps
+            energy_spectrum_ti, k_bins = compute_energy_spectra(pred[:, :, :, ti, :, trajectory]);
+            push!(energy_spectrum_trajectory, energy_spectrum_ti);
+        end
+        energy_spectrum_trajectory = cat(energy_spectrum_trajectory..., dims=3);
+        push!(energy_spectrum, energy_spectrum_trajectory);
+    end
+    energy_spectrum = cat(energy_spectrum..., dims=4); # num_bins, num_paths, num_steps, num_trajectories, 
+
+    return permutedims(energy_spectrum, (1, 3, 2, 4)); # num_bins, num_steps, num_paths, num_trajectories
+end
+
+function get_total_energy(pred)
+
+    num_trajectories = size(pred, 6)
+
+    total_energy = []
+    for trajectory in 1:num_trajectories
+        total_energy_trajectory = compute_total_energy(pred[:, :, :, :, :, trajectory]);
+        push!(total_energy, total_energy_trajectory);
+    end
+
+    return cat(total_energy..., dims=3); # num_steps, num_paths, num_trajectories
+end
+
+function get_mse(pred, _true)
+    num_trajectories = size(pred, 6)
+    num_paths = size(pred, 5)
+
+    mse = zeros(num_paths, num_trajectories)
+    for trajectory in 1:num_trajectories
+        for path in 1:num_paths
+            mse_trajectory = mean((pred[:, :, :, :, path, trajectory] .- _true[:, :, :, :, trajectory]).^2, dims=(1,2,3,4))[1, 1, 1, 1]
+            mse[path, trajectory] = mse_trajectory
+        end
+    end
+
+    return mse
+end
 
 
 
@@ -319,10 +388,10 @@ function compare_sde_pred_with_true(
     energy_std = std(energy_pred, dims=2)
     energy_mean = mean(energy_pred, dims=2)
 
-    plot(abs.(energy_mean .- 1f0 .*energy_std), fillrange=energy_mean .+ 1f0 .*energy_std, color=:green, alpha=0.25, primary=false)
-    plot!(energy_true, color=:blue, label="True", linewidth=3)
-    plot!(energy_mean, color=:green, label="Stochastic Interpolant", linewidth=3)
-    savefig(figures_save_path * "_energy.pdf")
+    Plots.plot(abs.(energy_mean .- 1f0 .*energy_std), fillrange=energy_mean .+ 1f0 .*energy_std, color=:green, alpha=0.25, primary=false)
+    Plots.plot!(energy_true, color=:blue, label="True", linewidth=3)
+    Plots.plot!(energy_mean, color=:green, label="Stochastic Interpolant", linewidth=3)
+    Plots.savefig(figures_save_path * "_energy.pdf")
 
     # Energy spectra
     energy_spectra_true, K_bins = compute_energy_spectra(x_true[:, :, :, end, num_test_trajectories:num_test_trajectories])
@@ -342,8 +411,8 @@ function compare_sde_pred_with_true(
     energy_spectra_mean = max.(energy_spectra_mean, 1e-8)
 
     # plot(lower_bound, fillrange=upper_bound, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false,ylims = (1e-8, max_spec))
-    plot(energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
-    plot!(energy_spectra_mean, color=:green, label="Stochastic Interpolant", linewidth=5, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
+    Plots.plot(energy_spectra_true, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
+    Plots.plot!(energy_spectra_mean, color=:green, label="Stochastic Interpolant", linewidth=5, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
     savefig(figures_save_path * "_energy_spectra.pdf")  
 
     true_freq, true_fft = compute_temporal_frequency(x_true[:, :, :, :, num_test_trajectories:num_test_trajectories])
@@ -361,9 +430,9 @@ function compare_sde_pred_with_true(
     true_fft = max.(true_fft .* true_fft, 1e-8)
     pred_fft_mean = max.(pred_fft_mean, 1e-8)
 
-    plot(true_fft, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
-    plot!(lower_bound, fillrange=upper_bound, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false, ylims = (1e-8, max_spec))
-    plot!(pred_fft_mean, color=:green, label="Stochastic Interpolant", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
+    Plots.plot(true_fft, color=:blue, label="True", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
+    Plots.plot!(lower_bound, fillrange=upper_bound, color=:green, alpha=0.25, xaxis=:log, yaxis=:log, primary=false, ylims = (1e-8, max_spec))
+    Plots.plot!(pred_fft_mean, color=:green, label="Stochastic Interpolant", linewidth=3, xaxis=:log, yaxis=:log, ylims = (1e-8, max_spec))
     savefig(figures_save_path * "_frequency.pdf")
 
     pathwise_MSE /= num_test_trajectories
@@ -389,7 +458,7 @@ function compare_sde_pred_with_true(
     );
     create_gif(
         preds_to_save, 
-        figures_save_path * ".mp4", 
+        figures_save_path, 
         ["True", "Pred mean", "Error", "Pred std", "Pred 1", "Pred 2", "Pred 3", "Pred 4"]
     )
 

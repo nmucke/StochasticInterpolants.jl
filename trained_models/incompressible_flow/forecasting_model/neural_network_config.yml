@@ -26,14 +26,14 @@ model_args:
     - 32
     - 64
     - 128
-  in_channels: 2
-  padding: "periodic"
-  out_channels: 2
+  in_channels: 3
+  padding: "smooth"
+  out_channels: 3
   len_history: 2
   embedding_dims: 128
   pars_dim: 1
   num_heads: 4
-  projection: "projection_with_obstacle"
+  projection: "nothing"
   attention_type: "DiT"
   attention_embedding_dims: 64
   model_type: "conv_next_u_net"

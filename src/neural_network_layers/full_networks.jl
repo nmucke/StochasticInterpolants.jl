@@ -21,7 +21,7 @@ function get_history_state_embedding(;
                 x, x_0 = x
 
                 H, W, C, len_history, B = size(x_0)
-                x_0=reshape(x_0, H, W, C*len_history, B)
+                x_0 = reshape(x_0, H, W, C*len_history, B)
 
                 x = cat(x, x_0; dims=3)
 
@@ -121,7 +121,10 @@ function get_SI_neural_network(;
 
             x = hist_state_embedding((x, x_0))
             t_pars = t_pars_embedding((pars, t))
-            @return main_model((x, t_pars))
+
+            out = main_model((x, t_pars))
+
+            @return out
         end
     else
         return @compact(

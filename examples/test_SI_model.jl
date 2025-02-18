@@ -26,12 +26,12 @@ cpu_dev = LuxCPUDevice();
 
 
 # Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "kolmogorov";
+test_case = "incompressible_flow";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "default";
+test_args = "pars_low";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 

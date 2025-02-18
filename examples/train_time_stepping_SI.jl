@@ -31,13 +31,13 @@ Random.seed!(rng, 0);
 dev = gpu_device();
 cpu_dev = LuxCPUDevice();
 
-# Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box"
-test_case = "kolmogorov";
+# Choose between "transonic_cylinder_flow", "incompressible_flow", "turbulence_in_periodic_box", "kolmogorov"
+test_case = "incompressible_flow";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "default";
+test_args = "pars_low";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -50,10 +50,10 @@ num_steps = size(trainset, 4);
 H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 
 ##### Hyperparameters #####
-continue_training = true;
+continue_training = false;
 model_base_dir = "trained_models/";
 # model_name = "forecasting_model_optimized_project_structure";
-model_name = "forecasting_model_not_optimized_new";
+model_name = "forecasting_model";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -101,20 +101,28 @@ interpolant = get_interpolant(
     T.(config["interpolant_args"]["coefs"]),
 );
 
-# coefs = [
-#     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-#     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-# ];
-# coefs = coefs .|> T;
+if test_case == "kolmogorov"
+    coefs = [
+        -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+        -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+    ];
+    coefs = coefs .|> T;
+elseif test_case == "incompressible_flow"
+    coefs = [
+        -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
+        -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
+    ]
+    coefs = coefs .|> T;
+end;
 
-# interpolant = Interpolant( 
-#     t -> get_alpha_series(t, coefs[1, :]), 
-#     t -> get_beta_series(t, coefs[2, :]), 
-#     t -> get_dalpha_series_dt(t, coefs[1, :]),
-#     t -> get_dbeta_series_dt(t, coefs[2, :]), 
-#     t -> 0.1f0 .* (1f0 .- t),
-#     t -> -1f0 .* 0.1f0
-# );
+interpolant = Interpolant( 
+    t -> get_alpha_series(t, coefs[1, :]), 
+    t -> get_beta_series(t, coefs[2, :]), 
+    t -> get_dalpha_series_dt(t, coefs[1, :]),
+    t -> get_dbeta_series_dt(t, coefs[2, :]), 
+    t -> 0.1f0 .* (1f0 .- t),
+    t -> -1f0 .* 0.1f0
+);
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(

@@ -114,7 +114,7 @@ function train_stochastic_interpolant(;
         # Save training loss
         loss_vec = vcat(loss_vec, running_loss)
         loss_dict[epoch] = running_loss
-        fig = plot(loss_vec, yaxis=:log)
+        fig = Plots.plot(loss_vec, yaxis=:log)
         checkpoint_manager.save_figure(fig, "training_loss.png")
         checkpoint_manager.write_dict_to_txt_file(loss_dict, "training_loss.txt")
         

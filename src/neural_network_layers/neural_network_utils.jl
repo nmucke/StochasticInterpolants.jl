@@ -48,9 +48,9 @@ end
 function get_padding(padding::String, padding_size::Int)
 
     if padding == "constant"
-        return a -> pad(a, 0, (padding_size, padding_size))
+        return a -> pad(a, Float32(0), (padding_size+1, padding_size+1))
     elseif padding == "smooth"
-        return a -> pad(a, :smooth, (padding_size, padding_size))
+        return a -> pad(a, :smooth, (padding_size+1, padding_size+1))
     elseif padding == "periodic"
         return a -> pad(a, :periodic, (padding_size, padding_size))
     else

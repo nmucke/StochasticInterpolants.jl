@@ -16,7 +16,7 @@ using ForwardDiff
 using Statistics
 using Plots
 
-test_case = "kolmogorov";
+test_case = "incompressible_flow";
 # test_case = "incompressible_flow";
 
 # Which type of testing to perform
@@ -291,10 +291,16 @@ coefs = [
     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
 ]
+
+coefs = [
+    -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
+    -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
+]
+
 coefs = coefs |> cpu_dev;
 
-x0 = testset[:, :, :, 100:100, 1]
-x1 = testset[:, :, :, 101:101, 1]
+x0 = testset[:, :, :, 10:10, 1]
+x1 = testset[:, :, :, 11:11, 1]
 
 x0_energy = 0.5*sum(x0.^2, dims=(1, 2, 3)) * omega[1] * omega[2]
 

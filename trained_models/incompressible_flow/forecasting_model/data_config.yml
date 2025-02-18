@@ -103,21 +103,24 @@ test_args:
 norm_mean:
   - 0.444969
   - 0.000299
+  - 0.000586
 parameter_dimensions:
   Reynolds Number: 1
 state_dimensions:
   height: 64
-  channels: 2
+  channels: 3
   width: 128
 pars_max:
   - 1000.0
 state_variables:
   - "velocity_x"
   - "velocity_y"
+  - "pressure"
 pars_min:
   - 100.0
 with_mask: true
 norm_std:
   - 0.206128
   - 0.206128
+  - 0.003942
 data_folder: "data/128_inc/128_inc"

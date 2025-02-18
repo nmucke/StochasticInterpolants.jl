@@ -4,12 +4,12 @@ data_folder: "data/128_inc/128_inc"
 state_variables:
   - velocity_x
   - velocity_y
-  # - pressure
+  - pressure
 
 state_dimensions:
   height: 64
   width: 128
-  channels: 2
+  channels: 3
 
 parameter_dimensions:
   Reynolds Number: 1
@@ -28,6 +28,7 @@ training_args:
 test_args:
   pars_low:
     ids: [0]
+    # ids: [0, 2, 4, 6, 8]
     # ids: [20]
     time_step_info:
       start_time: 1000
@@ -57,8 +58,10 @@ normalize_data: true
 # velocity_x: mean = 0.444969, std = 0.206128
 # velocity_y: mean = 0.000299, std = 0.206128
 # pressure: mean = 0.000586, std = 0.003942
-norm_mean: [0.444969, 0.000299] #, 0.000586]
-norm_std: [0.206128, 0.206128] #, 0.003942]
+# norm_mean: [0.444969, 0.000299] #, 0.000586]
+# norm_std: [0.206128, 0.206128] #, 0.003942]
+norm_mean: [0.444969, 0.000299, 0.000586]
+norm_std: [0.206128, 0.206128, 0.003942]
 
 pars_min: [100.0]
 pars_max: [1000.0]

@@ -92,6 +92,9 @@ include("projections.jl")
 
 # Plotting
 export create_gif
+export plot_energy_density
+export plot_energy_spectra
+export plot_total_energy
 
 # Checkpoint
 export save_checkpoint
@@ -122,6 +125,12 @@ export compare_ode_pred_with_true
 export compute_total_energy
 export compute_inner_product
 export compute_norm
+export get_energy_spectra
+export get_total_energy
+# export get_KL_divergence
+export get_mse
+export get_pearson_correlation
+
 
 # Projections
 export divfunc
