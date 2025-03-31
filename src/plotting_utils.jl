@@ -3,6 +3,11 @@ using Plots
 using GLMakie
 using KernelDensity
 
+tickfontsize = 10
+tickfontsize = 10
+legendfontsize = 10
+guidefontsize = 10
+
 # function create_gif(A, filename, plot_titles)
     
 #     p_list = [];
@@ -72,14 +77,14 @@ function plot_energy_density(; energies, labels)
     color_list = palette(:tab10);
 
     x = LinRange(0, 100, 2048)
-    p = Plots.plot(x_lims=(0, 100), xlabel="Energy", ylabel="P(energy)", normed=true)
+    p = Plots.plot(x_lims=(0, 100), xlabel="Energy", ylabel="P(Energy)", normed=true, xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
     counter = 1
     for energy in energies
         k = kde(energy)
         ik = InterpKDE(k)
         z = pdf(ik, x)
-        Plots.plot!(p, x, z, label=labels[counter], linewidth=3, color=color_list[counter])
-        Plots.plot!(p, x, z, fillrange=0, alpha=0.2, color=color_list[counter], linewidth=0, label="")
+        Plots.plot!(p, x, z, label=labels[counter], linewidth=3, color=color_list[counter], xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
+        Plots.plot!(p, x, z, fillrange=0, alpha=0.2, color=color_list[counter], linewidth=0, label="", xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
         counter += 1
     end
     return p
@@ -89,7 +94,7 @@ function plot_energy_spectra(; spectra, labels, with_ci=false, ylims=(1e-8, 5000
 
     color_list = palette(:tab10);
 
-    p = Plots.plot(ylims = ylims, xaxis=:log, yaxis=:log, xlabel="Frequency", ylabel="Energy");
+    p = Plots.plot(ylims = ylims, xaxis=:log, yaxis=:log, xlabel="Frequency", ylabel="Energy", xtickfontsize=10, ytickfontsize=10, xguidefontsize=15, yguidefontsize=15, legendfontsize=legendfontsize);
 
     counter = 1;
     for spectrum in spectra
@@ -116,10 +121,10 @@ function plot_energy_spectra(; spectra, labels, with_ci=false, ylims=(1e-8, 5000
         lower_bound = filter(!iszero, lower_bound)
         upper_bound = filter(!iszero, upper_bound)
 
-        Plots.plot!(p, mean_spectrum, label=labels[counter], linewidth=3, color=color_list[counter])
+        Plots.plot!(p, mean_spectrum, label=labels[counter], linewidth=3, color=color_list[counter], xtickfontsize=10, ytickfontsize=10, xguidefontsize=15, yguidefontsize=15, legendfontsize=legendfontsize)
         # plot!(p, lower_bound, alpha=0.2, color=color_list[counter], linewidth=5, label="")
         if with_ci
-            Plots.plot!(p, lower_bound, fillrange=upper_bound, alpha=0.2, color=color_list[counter], linewidth=0, label="")
+            Plots.plot!(p, lower_bound, fillrange=upper_bound, alpha=0.2, color=color_list[counter], linewidth=0, label="", xtickfontsize=10, ytickfontsize=10  , xguidefontsize=15, yguidefontsize=15, legendfontsize=legendfontsize)
         end
 
         counter += 1;
@@ -132,7 +137,7 @@ function plot_total_energy(; total_energy, labels, with_ci=false, ylims=(10, 100
 
     color_list = palette(:tab10);
 
-    p = Plots.plot(size=(800, 400), ylims = ylims, xlabel="Time", ylabel=ylabel);
+    p = Plots.plot(size=(675, 390), ylims = ylims, xlabel="Time step", ylabel=ylabel, xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize);
 
     counter = 1;
     for energy in total_energy
@@ -147,9 +152,9 @@ function plot_total_energy(; total_energy, labels, with_ci=false, ylims=(10, 100
                 for path_i in 1:size(energy, 2)
                     for trajectory_i in 1:size(energy, 3)
                         if path_i == 1 && trajectory_i == 1
-                            Plots.plot!(p, energy[:, path_i, trajectory_i], label=labels[counter], linewidth=2, color=color_list[counter], alpha=0.25)
+                            Plots.plot!(p, energy[:, path_i, trajectory_i], label=labels[counter], linewidth=2, color=color_list[counter], alpha=0.25, xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
                         else
-                            Plots.plot!(p, energy[:, path_i, trajectory_i], label="", linewidth=2, color=color_list[counter], alpha=0.25)
+                            Plots.plot!(p, energy[:, path_i, trajectory_i], label="", linewidth=2, color=color_list[counter], alpha=0.25, xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
                         end
                     end
                 end
@@ -163,9 +168,9 @@ function plot_total_energy(; total_energy, labels, with_ci=false, ylims=(10, 100
             else
                 for trajectory_i in 1:size(energy, 2)
                     if trajectory_i == 1
-                        Plots.plot!(p, energy[:, trajectory_i], label=labels[counter], linewidth=5, color=color_list[counter])
+                        Plots.plot!(p, energy[:, trajectory_i], label=labels[counter], linewidth=5, color=color_list[counter], xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
                     else
-                        Plots.plot!(p, energy[:, trajectory_i], label="", linewidth=5, color=color_list[counter])
+                        Plots.plot!(p, energy[:, trajectory_i], label="", linewidth=5, color=color_list[counter], xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
                     end
                 end
             end
@@ -177,9 +182,9 @@ function plot_total_energy(; total_energy, labels, with_ci=false, ylims=(10, 100
             # lower_bound = mean_energy .- std_energy;
             # upper_bound = mean_energy .+ std_energy;
 
-            Plots.plot!(p, mean_energy, label=labels[counter], linewidth=3, color=color_list[counter])
+            Plots.plot!(p, mean_energy, label=labels[counter], linewidth=3, color=color_list[counter], xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
             if with_ci
-                Plots.plot!(p, lower_bound, fillrange=upper_bound, alpha=0.1, color=color_list[counter], linewidth=0, label="")
+                Plots.plot!(p, lower_bound, fillrange=upper_bound, alpha=0.1, color=color_list[counter], linewidth=0, label="", xtickfontsize=tickfontsize, ytickfontsize=tickfontsize, xguidefontsize=guidefontsize, yguidefontsize=guidefontsize, legendfontsize=legendfontsize)
             end
         end
 

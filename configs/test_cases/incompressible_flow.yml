@@ -27,8 +27,8 @@ training_args:
 
 test_args:
   pars_low:
-    ids: [0]
-    # ids: [0, 2, 4, 6, 8]
+    # ids: [0]
+    ids: [0, 2, 4, 6, 8]
     # ids: [20]
     time_step_info:
       start_time: 1000

@@ -3,8 +3,8 @@ training_args:
   num_warmup_steps: 10
   num_test_paths: 5
   batch_size: 8
-  test_frequency: 20
-  num_test_sde_steps: 20
+  test_frequency: 10
+  num_test_sde_steps: 50
   min_learning_rate: 1.0e-6
   num_epochs: 1000
   max_learning_rate: 0.0001
@@ -26,20 +26,20 @@ model_args:
     - 32
     - 64
     - 128
-  in_channels: 3
-  padding: "smooth"
-  out_channels: 3
+  in_channels: 2
+  padding: "periodic"
+  out_channels: 2
   len_history: 2
   embedding_dims: 128
-  pars_dim: 1
+  pars_dim: 0
   num_heads: 4
-  projection: "nothing"
+  projection: ~
   attention_type: "DiT"
   attention_embedding_dims: 64
   model_type: "conv_next_u_net"
 diffusion_args:
   multiplier: 0.1
-  type: "follmer_optimal"
+  type: "linear"
 optimizer_args:
   betas:
     - 0.9

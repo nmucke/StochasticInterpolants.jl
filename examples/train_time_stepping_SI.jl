@@ -53,7 +53,7 @@ H, W, C = size(trainset, 1), size(trainset, 2), size(trainset, 3);
 continue_training = false;
 model_base_dir = "trained_models/";
 # model_name = "forecasting_model_optimized_project_structure";
-model_name = "forecasting_model";
+model_name = "forecasting_model_not_optimized";
 
 if continue_training
     checkpoint_manager = CheckpointManager(
@@ -101,28 +101,32 @@ interpolant = get_interpolant(
     T.(config["interpolant_args"]["coefs"]),
 );
 
-if test_case == "kolmogorov"
-    coefs = [
-        -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-        -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-    ];
-    coefs = coefs .|> T;
-elseif test_case == "incompressible_flow"
-    coefs = [
-        -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
-        -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
-    ]
-    coefs = coefs .|> T;
-end;
+# if test_case == "kolmogorov"
+#     coefs = [
+#         -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+#         -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+#     ];
+#     coefs = coefs .|> T;
+# elseif test_case == "incompressible_flow"
+#     # coefs = [
+#     #     -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
+#     #     -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
+#     # ]
+#     coefs = [
+#         -0.989095  -0.00250854   -0.0300531  -0.00134157   -0.00698907
+#         -0.988908   0.000802524  -0.0298362   0.000131528  -0.0066217
+#     ]
+#     coefs = coefs .|> T;
+# end;
 
-interpolant = Interpolant( 
-    t -> get_alpha_series(t, coefs[1, :]), 
-    t -> get_beta_series(t, coefs[2, :]), 
-    t -> get_dalpha_series_dt(t, coefs[1, :]),
-    t -> get_dbeta_series_dt(t, coefs[2, :]), 
-    t -> 0.1f0 .* (1f0 .- t),
-    t -> -1f0 .* 0.1f0
-);
+# interpolant = Interpolant( 
+#     t -> get_alpha_series(t, coefs[1, :]), 
+#     t -> get_beta_series(t, coefs[2, :]), 
+#     t -> get_dalpha_series_dt(t, coefs[1, :]),
+#     t -> get_dbeta_series_dt(t, coefs[2, :]), 
+#     t -> 0.1f0 .* (1f0 .- t),
+#     t -> -1f0 .* 0.1f0
+# );
 
 # Get diffusion coefficient
 diffusion_coefficient = get_diffusion_coefficient(
@@ -186,37 +190,6 @@ ps, st = train_stochastic_interpolant(
 
 CUDA.reclaim()
 GC.gc()
-
-
-
-velocity = get_SI_neural_network(;
-    image_size=(H, W),
-    model_params=config["model_args"]
-);
-ps, st = Lux.setup(rng, velocity) .|> dev;
-
-batch_size = 16;
-i = 1;
-x_1 = trainset.target_distribution[:, :, :, i:i+batch_size-1] |> dev;
-x_0 = trainset.init_distribution[:, :, :, :, i:i+batch_size-1] |> dev;
-
-x_history = x_0;
-x_0 = x_0[:, :, :, end, :];
-
-t = rand!(rng, similar(x_1, 1, 1, 1, batch_size));
-pars = trainset.pars_distribution[:, i:i+batch_size-1] |> dev;
-
-
-
-out, st = velocity((x_0, x_history, pars, t), ps, st)
-
-
-
-
-
-
-
-
 
 
 

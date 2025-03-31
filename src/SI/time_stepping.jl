@@ -57,7 +57,7 @@ function compute_multiple_SDE_steps(;
         end
 
         # CUDA.reclaim()
-        GC.gc(true)
+        # GC.gc(true)
 
     end
 

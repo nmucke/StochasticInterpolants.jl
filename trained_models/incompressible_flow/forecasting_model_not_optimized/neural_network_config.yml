@@ -30,7 +30,7 @@ model_args:
   padding: "smooth"
   out_channels: 3
   len_history: 2
-  embedding_dims: 128
+  embedding_dims: 256
   pars_dim: 1
   num_heads: 4
   projection: "nothing"

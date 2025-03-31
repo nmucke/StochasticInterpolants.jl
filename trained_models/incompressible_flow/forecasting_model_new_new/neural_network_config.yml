@@ -17,20 +17,20 @@ interpolant_args:
 model_args:
   use_attention_in_layer:
     - false
-    - false
-    - false
-    - false
+    - true
+    - true
+    - true
     - true
   channels:
+    - 8
     - 16
     - 32
     - 64
-    - 128
   in_channels: 3
   padding: "smooth"
   out_channels: 3
   len_history: 2
-  embedding_dims: 128
+  embedding_dims: 256
   pars_dim: 1
   num_heads: 4
   projection: "nothing"

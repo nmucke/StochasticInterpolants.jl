@@ -4,21 +4,12 @@
 Implementation of the Stochastic Interpolants method for generative modeling.
 """
 module StochasticInterpolants
-
-# using Lux
-# using Random
-# using CUDA
-# using NNlib
-# using Setfield
-# using LuxCUDA
-# using Boltz
 using Infiltrator
 
 ##### Layers #####
 include("neural_network_layers/conv_next.jl")
 include("neural_network_layers/embeddings.jl")
 include("neural_network_layers/transformer.jl")
-# include("neural_network_layers/conv.jl")
 include("neural_network_layers/autoencoder.jl")
 include("neural_network_layers/diffusion_transformer.jl")
 include("neural_network_layers/neural_network_utils.jl")
@@ -26,55 +17,6 @@ include("neural_network_layers/full_networks.jl")
 include("neural_network_layers/structure_preserving.jl")
 include("neural_network_layers/flash_attention.jl")
 
-# export flash_attention
-
-# export parameter_diffusion_transformer_block
-
-# export pars_cat
-# export transform_to_nothing
-# export Identity
-# export StateParsIdentity
-# export get_padding
-# export get_attention_layer
-# export get_t_pars_embedding
-
-# export transform_to_nothing
-# export LinearMultiHeadSelfAttention
-# export LinearSpatialAttention
-# export MultiHeadSelfAttention
-# export residual_block
-# export conv_next_block
-# export conv_next_block_no_pars
-# export get_history_state_embedding
-# export ConvNextUNetNoPars
-# export ConvNextUNetWithPars
-# export multiple_conv_next_blocks
-# export sinusoidal_embedding
-# export modulate
-# export patchify
-# export unpatchify
-# export reshape_modulation
-# export DiffusionTransformerBlock
-# export FinalLayer
-# export DiffusionTransformer
-# export ConditionalDiffusionTransformer
-# export ConvNextUNet
-# export parameter_diffusion_transformer_block
-# export SpatialAttention
-# export DitParsConvNextUNet
-# export AttnParsConvNextUNet
-# export conv_next_block_no_pars
-# export MultipleBlocks
-# export DownBlock
-# export UpBlock
-# export Encoder
-# export VariationalEncoder
-# export Decoder
-# export Autoencoder
-# export VariationalAutoencoder
-# export VAE_wrapper
-# export get_SI_neural_network
-# export get_encoder_neural_network
 
 
 include("unet_transformer.jl")
@@ -127,7 +69,6 @@ export compute_inner_product
 export compute_norm
 export get_energy_spectra
 export get_total_energy
-# export get_KL_divergence
 export get_mse
 export get_pearson_correlation
 
@@ -155,7 +96,6 @@ include("SI/time_stepping.jl")
 
 # Models
 export StochasticInterpolantModel
-# export ConditionalStochasticInterpolant
 export FollmerStochasticInterpolant
 export LatentFollmerStochasticInterpolant
 export DataDependentCouplingStochasticInterpolant
@@ -173,7 +113,6 @@ export SDE_heun
 export ODE_runge_kutta
 
 # Diffusion
-# export DiffusionCoefficient
 export get_diffusion_coefficient
 
 # Interpolants
@@ -214,44 +153,44 @@ include("training.jl")
 export train_diffusion_model
 export train_stochastic_interpolant
 
-##### DDPM #####
-include("DDPM/noise_scheduling.jl")
-include("DDPM/sampling.jl")
-include("DDPM/models.jl")
-include("DDPM/loss.jl")
+# ##### DDPM #####
+# include("DDPM/noise_scheduling.jl")
+# include("DDPM/sampling.jl")
+# include("DDPM/models.jl")
+# include("DDPM/loss.jl")
 
-# Noise scheduling
-export get_beta_schedule
-export get_index_from_list
-export forward_diffusion_sample
-export get_noise_scheduling
-export NoiseScheduling
+# # Noise scheduling
+# export get_beta_schedule
+# export get_index_from_list
+# export forward_diffusion_sample
+# export get_noise_scheduling
+# export NoiseScheduling
 
-# Sampling
-export sample_timestep
-export sample
+# # Sampling
+# export sample_timestep
+# export sample
 
-# Models
-export DenoisingDiffusionProbabilisticModel
+# # Models
+# export DenoisingDiffusionProbabilisticModel
 
-# Loss
-export get_loss
+# # Loss
+# export get_loss
 
-##### SMLD #####
-include("SMLD/models.jl")
-include("SMLD/loss.jl")
-include("SMLD/sampling.jl")
+# ##### SMLD #####
+# include("SMLD/models.jl")
+# include("SMLD/loss.jl")
+# include("SMLD/sampling.jl")
 
-# Loss
-export get_loss
+# # Loss
+# export get_loss
 
-# Models
-export ScoreMatchingLangevinDynamics
+# # Models
+# export ScoreMatchingLangevinDynamics
 
-# Sampling
-export euler_maruyama_sampler
-export smld_sde_sampler
-export smld_ode_sampler
+# # Sampling
+# export euler_maruyama_sampler
+# export smld_sde_sampler
+# export smld_ode_sampler
 
 
 

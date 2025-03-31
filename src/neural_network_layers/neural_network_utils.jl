@@ -45,12 +45,43 @@ function StateParsIdentity()
     end
 end
 
+function padimageconstant(input, pad)
+    H, W, C, N = size(input)
+    x, y = pad
+    
+    pad_left = zeros(eltype(input), H, x, C, N)
+    pad_right = zeros(eltype(input), H, x, C, N)
+    pad_top = zeros(eltype(input), y, W+2x, C, N)
+    pad_bottom = zeros(eltype(input), y, W+2x, C, N)
+
+    input = cat(pad_left, input, pad_right; dims=2)
+    input = cat(pad_top, input, pad_bottom; dims=1)
+    
+    return input
+end
+
 function get_padding(padding::String, padding_size::Int)
 
     if padding == "constant"
-        return a -> pad(a, Float32(0), (padding_size+1, padding_size+1))
+        return a -> padimageconstant(a, (padding_size, padding_size))
+        # return a -> ArrayPadding.pad(a, Float32(0), (padding_size, padding_size))
+        # return a -> begin
+        #     padded = a
+        #     for _ in 1:padding_size
+        #         # padded = ArrayPadding/pad(padded, Float32(0), (1, 1))
+        #         # padded = cat(padded, padded[:, :, end, :]; dims=3)
+                
+        #     end
+        #     return padded
+        # end
     elseif padding == "smooth"
-        return a -> pad(a, :smooth, (padding_size+1, padding_size+1))
+        return a -> begin
+            padded = a
+            for _ in 1:padding_size
+                padded = pad(padded, :smooth, (1, 1))
+            end
+            return padded
+        end
     elseif padding == "periodic"
         return a -> pad(a, :periodic, (padding_size, padding_size))
     else

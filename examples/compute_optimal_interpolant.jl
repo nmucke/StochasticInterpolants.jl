@@ -16,13 +16,13 @@ using ForwardDiff
 using Statistics
 using Plots
 
-test_case = "incompressible_flow";
+test_case = "kolmogorov";
 # test_case = "incompressible_flow";
 
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_low";
+test_args = "default";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -132,7 +132,7 @@ batch_size = 256
 # t = rand!(rng, similar(x_1, 1, 1, 1, batch_size)) |> dev;
 # x_0_batch = x_0[:, :, :, i:i+batch_size-1] |> dev;
 # x_1_batch = x_1[:, :, :, i:i+batch_size-1] |> dev;
-# I_velocity = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x)).^2)
+# I_velocity = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x[:, :, 1:2, :]), omega).^2)
 # e = I_velocity(coefs)
 
 # I_velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x)).^2)
@@ -187,6 +187,10 @@ for num_coefs in [5, ]
 
                 # I_velocity = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x)).^2)  
                 obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + lambda * sum(x.^2)
+                # obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + lambda * sum(x.^2)
+                # obj = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + lambda * sum(x.^2)
+                # obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2)# + lambda * sum(x.^2)
+                
                 # obj = x -> mean(interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(x), omega).^2) + 10f0 * sum(x.^2)
                 # obj = x -> mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(x)).^2) + 10f0 * sum(x.^2)
                 # grad = ForwardDiff.gradient(I_velocity, coefs)
@@ -215,28 +219,6 @@ for num_coefs in [5, ]
 
                 coefs = new_coefs
 
-                # lagrangian(coefs, t, lambda, mu) = begin
-                #     I_velocity = interpolant_velocity(x_0_batch, x_1_batch, t, interpolant(coefs)).^2
-                #     I_energy = d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs))
-                #     I_energy = mean(I_energy)
-                #     return mean(I_velocity) .+ lambda .* I_energy .+ 0.5f0 .* mu .* I_energy.^2 + sum(coefs.^2)
-                # end
-
-                # # update coefs
-                # obj = coefs -> lagrangian(coefs, t, lambda, mu)
-                
-                # grad = ForwardDiff.gradient(obj, coefs)
-                # coefs -= grad
-                # # hessian = ForwardDiff.hessian(obj, coefs)
-
-                # # coefs -= 1e-10 .* hessian \ grad
-                # # # update lambda
-                # lambda = lambda + mu .* mean(d_interpolant_energy_dt(x_0_batch, x_1_batch, t, interpolant(coefs)))
-
-                # # update mu
-                # mu = minimum([beta .* mu, mu_max])
-
-                # running_loss += obj(coefs)
             end
 
             # println("Epoch: $epoch, Loss: $(running_loss / batch_size)")
@@ -281,21 +263,44 @@ end
 
 coefs = reshape(best_coefs, 2, 5)
 
-coefs = [
-    -1.22202  -0.0658369  -0.0373067  -0.0114895   -0.0213044;
-    -1.22062  -0.0615028  -0.0364064  -0.00311659   0.00803215
-]
+coefs_energy = [
+    # 18.1921   23.337    7.50453  -2.39351  -1.5831
+    # -25.392   -24.2777  -6.41302   2.82029   1.46301
+    # -1.05701  -0.00180631   -0.0302278  -0.0021648   -0.00841667
+    # -1.05753   0.000520512  -0.0297646   0.00132788  -0.0046216
+    # -0.947154  -5.63862  -0.869923  -2.48371   0.228655
+    # -1.17808    5.63254   0.800721   2.48293  -0.242225
+    -1.05987  -0.000857944  -0.0283922  -0.000478533  -0.00400515
+    -1.06167   6.36467e-5   -0.0341536   0.000724897  -0.0100014
+] .|> Float32
 
-# 0.1 * gamma
-coefs = [
+
+coefs_transport = [
+    -0.0586196  0.00959212  -0.00419747  0.00131925  0.00117193
+    -0.058586   0.0096501   -0.00416698  0.00145934  0.00101391
+] .|> Float32
+
+# coefs = [
+#     -1.22202  -0.0658369  -0.0373067  -0.0114895   -0.0213044;
+#     -1.22062  -0.0615028  -0.0364064  -0.00311659   0.00803215
+# ]
+
+
+coefs_energy_transport = [
     -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
     -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-]
+] .|> Float32
+# coefs = [
+#     -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
+#     -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
+# ]
 
-coefs = [
-    -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
-    -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
-]
+
+
+
+t_vec = LinRange(0f0, 1f0, num_steps)
+t_all = reshape(t_vec, 1, 1, 1, num_steps)
+
 
 coefs = coefs |> cpu_dev;
 
@@ -305,33 +310,53 @@ x1 = testset[:, :, :, 11:11, 1]
 x0_energy = 0.5*sum(x0.^2, dims=(1, 2, 3)) * omega[1] * omega[2]
 
 num_steps = 1000
-t_vec = LinRange(0f0, 1f0, num_steps)
-dt = 1f0 / num_steps
+function compute_energy_evolution(coefs, x0_energy=x0_energy)
+    num_steps = 1000
+    t_vec = LinRange(0f0, 1f0, num_steps)
+    dt = 1f0 / num_steps
 
-alpha = t -> get_alpha_series(t, coefs[1, :])
-beta = t -> get_beta_series(t, coefs[2, :])
-plot(t_vec, alpha.(t_vec), label="Alpha", xlabel="Time", ylabel="Alpha", title="Alpha")
-plot!(t_vec, beta.(t_vec), label="Beta", xlabel="Time", ylabel="Beta", title="Beta")
+    alpha = t -> get_alpha_series(t, coefs[1, :])
+    beta = t -> get_beta_series(t, coefs[2, :])
+    # plot(t_vec, alpha.(t_vec), label="Alpha", xlabel="Time", ylabel="Alpha", title="Alpha")
+    # plot!(t_vec, beta.(t_vec), label="Beta", xlabel="Time", ylabel="Beta", title="Beta")
 
-energy_pred_list = zeros(num_steps)
-energy_true = []
-for (i, t) in enumerate(t_vec)
-    energy_t = x0_energy .+ dt .* d_interpolant_energy_dt(
-        x0, x1, t, interpolant(coefs, cpu_dev), omega, cpu_dev
-    )
-    energy_pred_list[i] = energy_t[1, 1, 1, 1]
-    x0_energy = energy_t
+    energy_pred_list = zeros(num_steps)
+    energy_true = []
+    for (i, t) in enumerate(t_vec)
+        energy_t = x0_energy .+ dt .* d_interpolant_energy_dt(
+            x0, x1, t, interpolant(coefs, cpu_dev), omega, cpu_dev
+        )
+        energy_pred_list[i] = energy_t[1, 1, 1, 1]
+        x0_energy = energy_t
+    end
+
+    return energy_pred_list
 end
 
-t_vec = LinRange(0f0, 1f0, num_steps)
-t_all = reshape(t_vec, 1, 1, 1, num_steps)
-noise = randn(size(x0)[1:3]..., 1);
-noise = repeat(noise, outer = [1, 1, 1, num_steps]);
+function compute_energy_evolution_true(coefs, x0, x1)
+    noise = randn(size(x0)[1:3]..., 1);
+    test_I = interpolant(coefs).interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* interpolant(coefs).gamma(t_all);
+    test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+    
+    energy_true = compute_total_energy(test_I, omega);
 
-test_I = interpolant(coefs).interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* interpolant(coefs).gamma(t_all);
-test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+    return energy_true
+end
 
-energy_true = compute_total_energy(test_I, omega);
+using Plots
+using LaTeXStrings
+
+
+x0 = testset[:, :, :, 10:10, 1]
+x1 = testset[:, :, :, 11:11, 1]
+
+num_cases = 100
+
+energy_transport = zeros(num_steps, Int(num_cases/10)*5)
+energy_energy = zeros(num_steps, Int(num_cases/10)*5)
+energy_energy_transport = zeros(num_steps, Int(num_cases/10)*5)
+energy_true_non_optimized = zeros(num_steps, Int(num_cases/10)*5)
+energy_true_non_optimized_linear = zeros(num_steps, Int(num_cases/10)*5)
 
 inter = get_interpolant(
     config["interpolant_args"]["alpha"],
@@ -340,15 +365,209 @@ inter = get_interpolant(
     config["interpolant_args"]["gamma_multiplier"],
 );
 
-test_I = inter.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
-test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+# test_I = inter.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
+# test_I = reshape(test_I, size(test_I)[1:4]..., 1);
 
-energy_true_lol = compute_total_energy(test_I, omega);
+# energy_true_non_optimized = compute_total_energy(test_I, omega);
 
-using Plots
-plot(t_vec, energy_pred_list, label="Predicted Energy", xlabel="Time", ylabel="Energy", title="Energy of the System")
-plot!(t_vec, energy_true, label="True Energy", xlabel="Time", ylabel="Energy", title="Energy of the System")
-plot!(t_vec, energy_true_lol, label="Random Energy", xlabel="Time", ylabel="Energy", title="Energy of the System")
+
+# noise = randn(size(x0)[1:3]..., 1);
+# test_I = interpolant(coefs_transport).interpolant(x0, x1, t_all) .+ sqrt.(t_all) .* noise .* interpolant(coefs_transport).gamma(t_all);
+# test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+
+# energy_true = compute_total_energy(test_I, omega);
+
+
+# noise = randn(size(x0)[1:3]..., 1);
+# test_I = inter.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
+# test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+
+# energy_true_non_optimized[:, 1] = compute_total_energy(test_I, omega);
+
+counter = 1
+for i in 1:10:num_cases
+    for j in 1:5
+        x0 = testset[:, :, :, i:i, j]
+        x1 = testset[:, :, :, i+1:i+1, j]
+
+        # e = compute_energy_evolution_true(coefs_transport, x0, x1) |> cpu
+        energy_transport[:, counter] = compute_energy_evolution_true(coefs_transport, x0, x1) |> cpu
+        energy_energy[:, counter] = compute_energy_evolution_true(coefs_energy, x0, x1)
+        energy_energy_transport[:, counter] = compute_energy_evolution_true(coefs_energy_transport, x0, x1)
+
+        noise = randn(size(x0)[1:3]..., 1);
+        test_I = inter.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
+        test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+        
+        energy_true_non_optimized[:, counter] = compute_total_energy(test_I, omega);
+
+        inter_linear = get_interpolant(
+            config["interpolant_args"]["alpha"],
+            "linear",
+            config["interpolant_args"]["gamma"],
+            config["interpolant_args"]["gamma_multiplier"],
+        );
+        test_I = inter_linear.interpolant(x0, x1, t_all) + sqrt.(t_all) .* noise .* inter.gamma(t_all);
+        test_I = reshape(test_I, size(test_I)[1:4]..., 1);
+        
+        energy_true_non_optimized_linear[:, counter] = compute_total_energy(test_I, omega);
+
+        
+        counter += 1
+    end
+end
+
+
+# velocity_transport = zeros(num_steps, num_cases*5)
+# velocity_energy = zeros(num_steps, num_cases*5)
+# velocity_energy_transport = zeros(num_steps, num_cases*5)
+# velocity = zeros(num_steps, num_cases*5)
+
+# counter = 1
+# for i in 1:10:num_cases
+#     for j in 1:5
+#         x0 = testset[:, :, :, i:i, j]
+#         x1 = testset[:, :, :, i+1:i+1, j]
+
+#         t = rand!(rng, similar(x_0, 1, 1, 1, batch_size)) |> dev;
+#         velocity[:, counter] = [mean(interpolant_velocity(x0 |> dev, x1 |> dev, t * ones(1,1,1,1) |> dev, inter, omega).^2) for t in t_vec]
+#         velocity_transport[:, counter] = [mean(interpolant_velocity(x0 |> dev, x1 |> dev, t * ones(1,1,1,1) |> dev, interpolant(coefs_transport), omega).^2) for t in t_vec]
+#         velocity_energy[:, counter] = [mean(interpolant_velocity(x0 |> dev, x1 |> dev, t * ones(1,1,1,1) |> dev, interpolant(coefs_energy), omega).^2) for t in t_vec]
+#         velocity_energy_transport[:, counter] = [mean(interpolant_velocity(x0 |> dev, x1 |> dev, t * ones(1,1,1,1) |> dev, interpolant(coefs_energy_transport), omega).^2) for t in t_vec]
+
+#         counter += 1
+#     end
+# end
+
+
+noise = randn(size(x0)[1:3]..., 1);
+noise = repeat(noise, outer = [1, 1, 1, num_steps]);
+
+
+Plots.plot(t_vec, mean(energy_true_non_optimized, dims=2), label="Not optimized (quadratic)", xlabel="Pseudo-time", ylabel="Energy", labelsize=2, linewidth=3, ylims=(20, 45), legendfontsize=10)
+# Plots.plot!(t_vec, mean(energy_transport, dims=2), label="Tranport Optimized", linewidth=3)
+# Plots.plot!(t_vec, mean(energy_energy, dims=2), label="Energy Optimized", linewidth=3)
+# Plots.plot!(t_vec, mean(energy_true_non_optimized_linear, dims=2), label="Not optimized (linear)", linewidth=3, legendfontsize=10)
+Plots.plot!(t_vec, mean(energy_energy_transport, dims=2), label="Optimized", linewidth=3, legendfontsize=10)
+Plots.savefig("interpolant_figures/energy_evolution.pdf")
+
+# println("Velocity: ", mean(velocity))
+# println("Velocity Transport: ", mean(velocity_transport))
+# println("Velocity Energy: ", mean(velocity_energy))
+# println("Velocity Energy Transport: ", mean(velocity_energy_transport))
+
+
+# Plots.plot(t_vec, mean(velocity), label="Not optimized", xlabel="Pseudo-time", ylabel="Transport cost", linewidth=3)
+# Plots.plot!(t_vec, mean(velocity_transport), label="Transport optimized", linewidth=3)
+# Plots.plot!(t_vec, mean(velocity_energy), label="Energy optimized", linewidth=3)
+# Plots.plot!(t_vec, mean(velocity_energy_transport), label="Energy and Transport optimized",  linewidth=3)
+
+
+interpolant_transport = interpolant(coefs_transport)
+interpolant_energy = interpolant(coefs_energy)
+interpolant_energy_transport = interpolant(coefs_energy_transport)
+
+inter_linear = get_interpolant(
+    config["interpolant_args"]["alpha"],
+    "linear",
+    config["interpolant_args"]["gamma"],
+    config["interpolant_args"]["gamma_multiplier"],
+);
+
+Plots.plot(t_vec, inter.alpha(t_vec), label="Not optimized", xlabel="Pseudo-time", ylabel=L"\alpha_{\tau}", linewidth=3)
+# Plots.plot!(t_vec, interpolant_transport.alpha(t_vec), label="Transport optimized",  linewidth=3)
+# Plots.plot!(t_vec, interpolant_energy.alpha(t_vec), label="Energy optimized", linewidth=3)
+Plots.plot!(t_vec, interpolant_energy_transport.alpha(t_vec), label="Optimized",linewidth=3)
+Plots.savefig("interpolant_figures/alpha.pdf")
+
+
+Plots.plot(t_vec, inter.beta(t_vec), label="Not optimized (quadratic)", xlabel="Pseudo-time", ylabel=L"\beta_{\tau}", linewidth=3)
+# Plots.plot!(t_vec, interpolant_transport.beta(t_vec), label="Transport optimized", linewidth=3)
+# Plots.plot!(t_vec, interpolant_energy.beta(t_vec), label="Energy optimzied", linewidth=3)
+
+# Plots.plot!(t_vec, inter_linear.beta(t_vec), label="Not optimized (linear)", linewidth=3)
+Plots.plot!(t_vec, interpolant_energy_transport.beta(t_vec), label="Optimized", linewidth=3)
+Plots.savefig("interpolant_figures/beta.pdf")
+
+
+
+
+min_velocity = minimum(sqrt.(testset[:, :, 1, :, :].^2 + testset[:, :, 2, :, :].^2))
+max_velocity = maximum(sqrt.(testset[:, :, 1, :, :].^2 + testset[:, :, 2, :, :].^2))
+
+
+min_x = minimum(testset[:, :, :, :, :])
+max_x = maximum(testset[:, :, :, :, :])
+
+step = 0.1
+t = step * ones(1,1,1,1) |> dev
+velocity_magnitude = interpolant(coefs_energy_transport).interpolant(x0 |> dev, x1 |> dev, t)
+
+using CairoMakie
+using GLMakie
+times_to_plot = [0, 0.2, 0.4, 0.6, 0.8, 1]
+n_plots = 6
+
+fig_width = 400 * n_plots # 200 pixels per plot
+fig_height = 400 # Keep height constant
+fig = CairoMakie.Figure(; size = (fig_width, fig_height))
+hm = nothing
+for (i, time_step) in enumerate(times_to_plot)
+    if i == 1
+        y_label = "Optimized interpolant"
+    else
+        y_label = ""
+    end
+    ax = Axis(
+        fig[1, i];
+        # title = "Time step $time_step",
+        aspect = DataAspect(),
+        xticksvisible = false,
+        xticklabelsvisible = false,
+        yticksvisible = false,
+        yticklabelsvisible = false,
+        ylabel = y_label,
+        ylabelsize = 40,
+        # titlesize = 40,
+    )
+    t = time_step * ones(1,1,1,1) |> dev
+    inter = interpolant(coefs_energy_transport)
+
+    # inter = get_interpolant(
+    #     config["interpolant_args"]["alpha"],
+    #     config["interpolant_args"]["beta"],
+    #     config["interpolant_args"]["gamma"],
+    #     config["interpolant_args"]["gamma_multiplier"],
+    # );
+
+    velocity_magnitude = inter.dinterpolant_dt(x0 |> dev, x1 |> dev, t)
+
+    println(t)
+
+    z = randn(size(x0)) |> dev
+    noise = sqrt.(t) .* z .* inter.gamma(t)
+    velocity_magnitude = velocity_magnitude + noise
+    # velocity_magnitude = sqrt.(velocity_magnitude[:, :, 1, 1].^2 + velocity_magnitude[:, :, 2, 1].^2) |> cpu
+    velocity_magnitude = velocity_magnitude[:, :, 1, 1] |> cpu
+    hm = GLMakie.heatmap!(
+        ax, 
+        velocity_magnitude; 
+        colormap = Reverse(:Spectral_11), 
+        # colorrange = (min_velocity, max_velocity),
+        colorrange = (-0.7, 0.7),
+    )
+end
+Colorbar(fig[1, end+1], hm, ticklabelsize=25, width=30)
+CairoMakie.save("interpolant_figures/optimized_interpolant_drift.pdf", fig)
+
+
+
+
+
+
+
+
+
 
 
 t = 0.5

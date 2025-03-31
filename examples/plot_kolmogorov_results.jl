@@ -19,6 +19,11 @@ using CairoMakie
 rng = Random.default_rng();
 Random.seed!(rng, 0);
 
+tickfontsize = 10
+tickfontsize = 10
+legendfontsize = 10
+guidefontsize = 10
+
 
 
 # Choose between "incompressible_flow", "kolmogorov"
@@ -299,23 +304,23 @@ for case in cases_to_plot
 end
 
 
-for case in cases_to_plot
+# for case in cases_to_plot
 
-    if case == "refiner_"
-        _num_generator_steps_list = refiner_steps_list
-    else
-        _num_generator_steps_list = num_generator_steps_list;
-    end
+#     if case == "refiner_"
+#         _num_generator_steps_list = refiner_steps_list
+#     else
+#         _num_generator_steps_list = num_generator_steps_list;
+#     end
 
-    for num_generator_steps in _num_generator_steps_list
-        pred = load("$results_dir$case$num_generator_steps.jld2", "data"); # H, W, C, num_steps, nums_paths, num_test
-        pred_vel_magnitude = sqrt.(pred[:, :, 1, :, :, 1].^2 .+ pred[:, :, 2, :, :, 1].^2);
-        plot_list = [pred_vel_magnitude[:, :, :, i] for i in 1:5];
-        create_gif(plot_list, "animations/$case$num_generator_steps", ["", "", "", "", ""])
+#     for num_generator_steps in _num_generator_steps_list
+#         pred = load("$results_dir$case$num_generator_steps.jld2", "data"); # H, W, C, num_steps, nums_paths, num_test
+#         pred_vel_magnitude = sqrt.(pred[:, :, 1, :, :, 1].^2 .+ pred[:, :, 2, :, :, 1].^2);
+#         plot_list = [pred_vel_magnitude[:, :, :, i] for i in 1:5];
+#         create_gif(plot_list, "animations/$case$num_generator_steps", ["", "", "", "", ""])
         
-        println("Case $case$num_generator_steps done")
-    end
-end
+#         println("Case $case$num_generator_steps done")
+#     end
+# end
 
 
 for case in cases_to_plot
@@ -374,7 +379,7 @@ for (i, time_step) in enumerate(times_to_plot)
         colorrange = (minimum(velocity_magnitude_true), maximum(velocity_magnitude_true)),
     )
 end
-Colorbar(fig[1, end+1], hm)
+Colorbar(fig[1, end+1], hm, ticklabelsize=25, width=30)
 CairoMakie.save("$figure_folder/velocity_magnitude_true.pdf", fig)
 
 
@@ -410,7 +415,7 @@ for (j, case) in enumerate(cases_to_plot)
             GLMakie.heatmap!(ax, velocity_magnitude; colormap = Reverse(:Spectral_11), colorrange = (minimum(velocity_magnitude_true), maximum(velocity_magnitude_true)))
 
         end
-        Colorbar(fig[1, end+1], hm)
+        Colorbar(fig[1, end+1], hm,  ticklabelsize=25, width=30)
         CairoMakie.save("$figure_folder/velocity_magnitude_$(case)$(num_generator_steps).pdf", fig)
     end
 end
@@ -454,7 +459,7 @@ for (j, case) in enumerate(cases_to_plot)
                     colorrange = (minimum(velocity_magnitude_true), maximum(velocity_magnitude_true)),
                 )
             end
-            Colorbar(fig[1, end+1], hm)
+            Colorbar(fig[1, end+1], hm, ticklabelsize=25, width=30)
             CairoMakie.save("$figure_folder/velocity_magnitude_$(case)$(num_generator_steps)_time_step_$(time_step)_paths.pdf", fig)
         end
     end

@@ -1,4 +1,4 @@
-ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "10GiB"
+ENV["JULIA_CUDA_SOFT_MEMORY_LIMIT"] = "20GiB"
 ENV["TMPDIR"] = "/export/scratch1/ntm/postdoc/StochasticInterpolants.jl/tmp"
 
 using JLD2
@@ -31,7 +31,7 @@ test_case = "incompressible_flow";
 # Which type of testing to perform
 # options are "pars_extrapolation", "pars_interpolation", "long_rollouts" for "transonic_cylinder_flow" test case
 # options are "pars_low", "pars_high", "pars_var" for "incompressible_flow" test case
-test_args = "pars_low";
+test_args = "pars_high";
 
 trainset, trainset_pars, testset, testset_pars, normalize_data, mask, num_pars = load_test_case_data(
     test_case, 
@@ -47,7 +47,11 @@ H, W, C = size(testset, 1), size(testset, 2), size(testset, 3);
 ##### Hyperparameters #####
 model_base_dir = "trained_models/";
 # model_name = "forecasting_model_optimized_project_structure";
-model_name = "forecasting_model_optimized_project_new";
+if test_case == "kolmogorov"
+    model_name = "forecasting_model_optimized_project_new";
+else
+    model_name = "forecasting_model";
+end;
 # model_name = "forecasting_model_not_optimized";
 
 checkpoint_manager = CheckpointManager(
@@ -80,13 +84,28 @@ interpolant = get_interpolant(
     config["interpolant_args"]["gamma_multiplier"] |> Float32,
 );
 
-if model_name == "forecasting_model_optimized" || model_name == "forecasting_model_optimized_new"  || model_name == "forecasting_model_optimized_refactored" || model_name == "forecasting_model_optimized_project_new"
+if model_name == "forecasting_model_optimized" || model_name == "forecasting_model_optimized_new"  || model_name == "forecasting_model_optimized_refactored" || model_name == "forecasting_model_optimized_project_new" || model_name == "forecasting_model"
     print("Using optimized coefficients")
 
-    coefs = [
-        -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
-        -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
-    ]
+    coefs = nothing;
+    if test_case == "kolmogorov"
+        coefs = [
+            -1.05734  -0.00348673  -0.0312818  -0.00382112  -0.00580364;
+            -1.05611   0.00127347  -0.0293777   0.00343358  -0.00645624
+        ];
+        # coefs = coefs .|> T;
+    elseif test_case == "incompressible_flow"
+        # coefs = [
+        #     -0.991808  -0.00170546  -0.0325862  -0.00137419   -0.00699029
+        #     -0.991881   0.00141638  -0.0326092  -0.000478376  -0.00664719
+        # ]
+        coefs = [
+            -0.989095  -0.00250854   -0.0300531  -0.00134157   -0.00698907
+            -0.988908   0.000802524  -0.0298362   0.000131528  -0.0066217
+        ]
+        # coefs = coefs .|> T;
+    end;
+
     coefs = coefs .|> Float32;
     
     interpolant = Interpolant(
@@ -142,13 +161,13 @@ num_test_trajectories = size(testset, 5);
 num_test_paths = 5;
 energy_spectrum_true, k_bins = compute_energy_spectra(testset[:, :, :, end, :]);
 
-for num_generator_steps = [100]
+for num_generator_steps = [20]
     pred_sol = zeros(H, W, C, num_steps, num_test_paths, num_test_trajectories);
     energy_pred = zeros(num_steps, num_test_paths, num_test_trajectories);
     energy_spectrum_pred = zeros(size(k_bins,1), num_test_paths, num_test_trajectories);
 
     for i in 1:num_test_trajectories
-        sol = compute_multiple_SDE_steps(
+        @time sol = compute_multiple_SDE_steps(
             init_condition=testset[:, :, :, 1:config["model_args"]["len_history"], i],
             parameters=testset_pars[:, 1:1, i],
             num_physical_steps=size(testset, 4),
@@ -165,11 +184,27 @@ for num_generator_steps = [100]
         # energy_pred[:, :, i] = compute_total_energy(sol, omega);
         # energy_spectrum_pred[:, :, i], _ = compute_energy_spectra(sol[:, :, :, end, :]);
     end;
-    save("$(model_name)$(num_generator_steps).jld2", "data", pred_sol)
+    save("$(test_case)_$(model_name)_$(num_generator_steps).jld2", "data", pred_sol)
 
 end;
 
 
+
+
+@time compare_sde_pred_with_true(
+    model,
+    ps,
+    st_,
+    testset,
+    testset_pars,
+    num_test_paths,
+    normalize_data,
+    mask,
+    10,
+    "$(model_name)_$(num_generator_steps)",
+    rng,
+    dev,
+)
 
 
 
@@ -206,10 +241,10 @@ omega = [0.04908f0, 0.04908f0]
 
 st_ = Lux.testmode(st);
 num_test_trajectories = size(testset, 5);
-num_test_paths = 5;
+num_test_paths = 1;
 energy_spectrum_true, k_bins = compute_energy_spectra(testset[:, :, :, end, :]);
 
-for num_generator_steps = [10, 25, 50, 100]
+for num_generator_steps = [20]
     pred_sol = zeros(H, W, C, num_steps, num_test_paths, num_test_trajectories);
     energy_pred = zeros(num_steps, num_test_paths, num_test_trajectories);
     energy_spectrum_pred = zeros(size(k_bins,1), num_test_paths, num_test_trajectories);
@@ -315,22 +350,6 @@ plot!(t_vec, reshape(energy_pred, num_steps, num_test_paths*num_test_trajectorie
 
 
 save("testset.jld2", "data", testset)
-
-
-@time compare_sde_pred_with_true(
-    model,
-    ps,
-    st_,
-    testset,
-    testset_pars,
-    num_test_paths,
-    normalize_data,
-    mask,
-    num_generator_steps,
-    "$(model_name)_$(num_generator_steps)",
-    rng,
-    dev,
-)
 
 
 

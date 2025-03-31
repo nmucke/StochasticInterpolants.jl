@@ -55,16 +55,16 @@ function conv_next_block_no_pars(;
         conv_net = Chain(
             Lux.InstanceNorm(in_channels),
             get_padding(padding, 1),
-            # TODO: check if this is correct
-            Lux.Conv((3, 3), (in_channels => in_channels * multiplier); pad=1),
+            Lux.Conv((3, 3), (in_channels => in_channels * multiplier); pad=0),
             NNlib.gelu,
             Lux.InstanceNorm(in_channels * multiplier),
             get_padding(padding, 1),
-            # TODO: check if this is correct
-            Lux.Conv((3, 3), (in_channels * multiplier => out_channels); pad=1),
+            Lux.Conv((3, 3), (in_channels * multiplier => out_channels); pad=0),
         ),
         res_conv = Lux.Conv((1, 1), (in_channels => out_channels); pad=0)
     ) do x
+
+
         h = ds_conv(x)
         h = conv_net(h)
 
@@ -150,13 +150,11 @@ function conv_next_block(;
         conv_net = Chain(
             Lux.InstanceNorm(in_channels),
             get_padding(padding, 1),
-            # TODO: check if this is correct
-            Lux.Conv((3, 3), (in_channels => in_channels * multiplier); pad=1),
+            Lux.Conv((3, 3), (in_channels => in_channels * multiplier); pad=0),
             NNlib.gelu,
             Lux.InstanceNorm(in_channels * multiplier),
             get_padding(padding, 1),
-            # TODO: check if this is correct
-            Lux.Conv((3, 3), (in_channels * multiplier => out_channels); pad=1),
+            Lux.Conv((3, 3), (in_channels * multiplier => out_channels); pad=0),
         ),
         res_conv = Lux.Conv((1, 1), (in_channels => out_channels); pad=0)
     ) do x

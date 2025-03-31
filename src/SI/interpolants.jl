@@ -151,6 +151,9 @@ function d_interpolant_energy_dt(
     dev=gpu_device()
 )
 
+    x_0 = x_0[:, :, 1:2, :]
+    x_1 = x_1[:, :, 1:2, :]
+
     H, W, C = size(x_0)[1], size(x_0)[2], size(x_0)[3]
     N = H * W * C
 
